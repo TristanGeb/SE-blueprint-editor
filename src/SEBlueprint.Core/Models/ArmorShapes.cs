@@ -173,8 +173,10 @@ public static class ArmorShapes
 
         var positions = new List<Vector3>();
         var normals = new List<Vector3>();
+        var texCoords = new List<Vector2>();
         foreach (var (n, d) in planes)
         {
+            var (texU, texV) = FaceTextureAxes(n);
             // Points on this face, sorted counter-clockwise around the face center as seen from outside.
             var face = pts.Where(p => MathF.Abs(Vector3.Dot(n, p) - d) < eps).ToList();
             var fc = face.Aggregate(Vector3.Zero, (a, b) => a + b) / face.Count;
@@ -185,15 +187,34 @@ public static class ArmorShapes
 
             for (var t = 1; t + 1 < face.Count; t++)
             {
-                positions.Add(face[0]);
-                positions.Add(face[t]);
-                positions.Add(face[t + 1]);
-                normals.Add(n);
-                normals.Add(n);
-                normals.Add(n);
+                foreach (var p in new[] { face[0], face[t], face[t + 1] })
+                {
+                    positions.Add(p);
+                    normals.Add(n);
+                    // Block units: a full face spans 0..1 in both directions (a slope's long side ~1.41).
+                    texCoords.Add(new Vector2(Vector3.Dot(p, texU) + 0.5f, Vector3.Dot(p, texV) + 0.5f));
+                }
             }
         }
 
-        return new MeshData(positions.ToArray(), normals.ToArray(), Enumerable.Range(0, positions.Count).ToArray());
+        return new MeshData(positions.ToArray(), normals.ToArray(), Enumerable.Range(0, positions.Count).ToArray(), texCoords.ToArray());
+    }
+
+    /// <summary>
+    /// Two directions lying in a face, used to lay the texture onto it ("planar projection"). For faces
+    /// along the cube's sides these are cube axes; for sloped faces the axis that lies in the face is kept
+    /// and the other follows the slope, so the texture isn't squashed.
+    /// </summary>
+    private static (Vector3 U, Vector3 V) FaceTextureAxes(Vector3 n)
+    {
+        var a = Vector3.Abs(n);
+        // Preferred "across" direction: X for most faces, Z for faces pointing mostly left/right.
+        var across = a.X >= a.Y && a.X >= a.Z ? Vector3.UnitZ : Vector3.UnitX;
+        var u = across - n * Vector3.Dot(across, n);
+        if (u.LengthSquared() < 1e-6f)
+            u = Vector3.UnitY - n * Vector3.Dot(Vector3.UnitY, n);
+        u = Vector3.Normalize(u);
+        var v = Vector3.Cross(n, u); // in the face, at right angles to u
+        return (u, v);
     }
 }

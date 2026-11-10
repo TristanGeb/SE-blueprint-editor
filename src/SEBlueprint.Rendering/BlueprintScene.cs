@@ -181,7 +181,7 @@ public sealed class BlueprintScene
         entry.Models.Clear();
     }
 
-    private static InstancingMeshGeometryModel3D CreateBatchModel(SceneBatch batch)
+    private InstancingMeshGeometryModel3D CreateBatchModel(SceneBatch batch)
     {
         var look = batch.Part.Appearance;
         var parameters = new InstanceParameter[batch.Colors.Length];
@@ -190,9 +190,15 @@ public sealed class BlueprintScene
             var c = batch.Colors[i];
             var color = new HelixToolkit.Maths.Color4(c.X, c.Y, c.Z, c.W);
             parameters[i] = look.Kind == PartKind.Emissive
-                ? new InstanceParameter { DiffuseColor = color, EmissiveColor = new HelixToolkit.Maths.Color4(c.X * 0.6f, c.Y * 0.6f, c.Z * 0.6f, 1f) }
+                ? new InstanceParameter { DiffuseColor = color, EmissiveColor = new HelixToolkit.Maths.Color4(0.5f, 0.5f, 0.5f, 1f) }
                 : new InstanceParameter { DiffuseColor = color };
+            if (batch.TexOffsets is { } offsets)
+                parameters[i].TexCoordOffset = offsets[i];
         }
+
+        var texture = batch.Textured && _models.ContentFolder is { } content
+            ? TextureCache.Get(content, batch.Part.Textures!.ColorMetal)
+            : null;
 
         // Highlights are white whatever the paint, like the game's metal: they keep the shape readable even on
         // near-black paint (where diffuse lighting alone leaves everything flat black).
@@ -216,6 +222,7 @@ public sealed class BlueprintScene
                 AmbientColor = new HelixToolkit.Maths.Color4(0.3f, 0.3f, 0.3f, 1f),
                 SpecularColor = new HelixToolkit.Maths.Color4(specular, specular, specular, 1f),
                 SpecularShininess = shininess,
+                DiffuseMap = texture,
             },
         };
     }
@@ -230,6 +237,8 @@ public sealed class BlueprintScene
                 Normals = new HelixToolkit.Vector3Collection(mesh.Normals),
                 Indices = new HelixToolkit.IntCollection(mesh.Indices),
             };
+            if (mesh.TexCoords is { } uv)
+                gpu.TextureCoordinates = new HelixToolkit.Vector2Collection(uv);
             GpuMeshes[mesh] = gpu;
         }
         return gpu;

@@ -130,6 +130,9 @@ public sealed class DefinitionRepository
             string.IsNullOrWhiteSpace(model) ? null : model.Trim())
         {
             CubeTopology = def.Element("CubeDefinition")?.ChildValue("CubeTopology"),
+            ArmorTileModel = def.Element("CubeDefinition")?.Element("Sides")?.Elements("Side")
+                .Select(s => s.Attribute("Model")?.Value)
+                .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))?.Trim(),
             ModelOffset = XmlHelpers.ReadVector3(def.Element("ModelOffset")) ?? System.Numerics.Vector3.Zero,
         };
     }

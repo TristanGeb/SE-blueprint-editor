@@ -12,6 +12,9 @@ public sealed class MwmModel
 
     public Vector3[] Positions { get; init; } = Array.Empty<Vector3>();
 
+    /// <summary>Texture coordinates per vertex (same count as <see cref="Positions"/>), or empty if the model has none.</summary>
+    public Vector2[] TexCoords { get; init; } = Array.Empty<Vector2>();
+
     public IReadOnlyList<MwmMeshPart> Parts { get; init; } = Array.Empty<MwmMeshPart>();
 
     /// <summary>True if triangles are stored clockwise and must be flipped.</summary>

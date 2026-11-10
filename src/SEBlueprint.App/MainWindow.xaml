@@ -71,6 +71,8 @@
             <MenuItem Header="_View">
                 <MenuItem Header="_Zoom to fit" InputGestureText="F" Click="OnZoomExtents" />
                 <Separator />
+                <MenuItem Header="Show _textures" Command="{Binding ToggleTexturesCommand}"
+                          IsChecked="{Binding ShowTextures, Mode=OneWay}" />
                 <MenuItem Header="Model _detail">
                     <MenuItem Header="_Boxes only (fastest)"
                               Command="{Binding SetModelDetailCommand}" CommandParameter="{x:Static models:ModelDetail.Boxes}"

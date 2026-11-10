@@ -53,6 +53,12 @@ public sealed class SceneBatch
 
     /// <summary>RGBA 0..1 per instance.</summary>
     public required Vector4[] Colors { get; init; }
+
+    /// <summary>True if drawn with its texture (otherwise flat color).</summary>
+    public required bool Textured { get; init; }
+
+    /// <summary>Per-instance texture offset picking the armor pattern variant, or null.</summary>
+    public Vector2[]? TexOffsets { get; init; }
 }
 
 public sealed class BlueprintSceneData
@@ -71,6 +77,12 @@ public static class SceneBuilder
     public static readonly Vector3 UnknownBlockColor = new(1f, 0f, 1f);
 
     public const float GlassAlpha = 0.35f;
+
+    /// <summary>
+    /// Textured paintable parts are drawn as texture × paint color. The game's painted-metal textures are
+    /// mid grey, so the paint is brightened to land near the game's on-screen brightness.
+    /// </summary>
+    public const float PaintTextureBoost = 1.8f;
 
     /// <summary>
     /// Builds draw data for every grid. The grid with the most blocks becomes the "main" grid: the scene is
@@ -92,6 +104,16 @@ public static class SceneBuilder
             grids.Add(BuildGrid(grid, definitions, models, gridToScene));
         }
 
+        // Read every texture the scene needs now, on this background thread, so the UI thread only has to
+        // hand finished bytes to the GPU.
+        if (models.UseTextures && models.ContentFolder is { } content)
+        {
+            TextureCache.Preload(content, grids
+                .SelectMany(g => g.Batches)
+                .Where(b => b.Textured)
+                .Select(b => b.Part.Textures!.ColorMetal));
+        }
+
         return new BlueprintSceneData { Blueprint = blueprint, Grids = grids };
     }
 
@@ -111,14 +133,16 @@ public static class SceneBuilder
             var visual = models.Get(def);
             var transform = VisualTransform(block, def, visual, gap) * gridToScene;
             var paint = def.IsUnknown ? UnknownBlockColor : SeColor.MaskToRgb(block.ColorMaskHsv);
+            var patternOffset = PatternOffset(block, visual.PatternCells);
 
             foreach (var part in visual.Parts)
             {
                 if (!batches.TryGetValue(part, out var batch))
-                    batches[part] = batch = new BatchBuilder();
+                    batches[part] = batch = new BatchBuilder(models.UseTextures && part.IsTextured);
                 batch.Indices.Add(i);
                 batch.Transforms.Add(transform);
-                batch.Colors.Add(ColorFor(part.Appearance, paint));
+                batch.Colors.Add(ColorFor(part.Appearance, paint, batch.Textured));
+                batch.TexOffsets.Add(patternOffset);
             }
         }
 
@@ -134,6 +158,8 @@ public static class SceneBuilder
                 BlockIndices = kv.Value.Indices.ToArray(),
                 Transforms = kv.Value.Transforms.ToArray(),
                 Colors = kv.Value.Colors.ToArray(),
+                Textured = kv.Value.Textured,
+                TexOffsets = kv.Value.Textured && kv.Value.TexOffsets.Any(o => o != Vector2.Zero) ? kv.Value.TexOffsets.ToArray() : null,
             }).ToList(),
         };
     }
@@ -178,17 +204,41 @@ public static class SceneBuilder
         return rotation * Matrix4x4.CreateTranslation(center + offset);
     }
 
-    private static Vector4 ColorFor(PartAppearance look, Vector3 paint) => look.Kind switch
+    /// <summary>
+    /// The color multiplied with the part. Untextured parts use their flat color. Textured parts are tinted:
+    /// the game's textures mostly carry detail (panel lines, wear) on a neutral grey, while the actual color
+    /// comes from the paint or from the material ("PaintedMetal_Darker" uses a light texture made dark in-game).
+    /// </summary>
+    private static Vector4 ColorFor(PartAppearance look, Vector3 paint, bool textured) => (look.Kind, textured) switch
     {
-        PartKind.Paint => new Vector4(paint, 1f),
-        PartKind.Glass => new Vector4(look.Color, GlassAlpha),
+        (PartKind.Glass, _) => new Vector4(look.Color, GlassAlpha),
+        (PartKind.Paint, true) => new Vector4(paint * PaintTextureBoost, 1f),
+        (PartKind.Paint, false) => new Vector4(paint, 1f),
+        (_, true) => new Vector4(look.Color * PaintTextureBoost, 1f),
         _ => new Vector4(look.Color, 1f),
     };
 
-    private sealed class BatchBuilder
+    /// <summary>
+    /// Picks one cell of the armor texture's pattern grid from the block's position (a cheap, stable hash),
+    /// so neighbouring armor blocks show different variants like in the game.
+    /// </summary>
+    private static Vector2 PatternOffset(Block block, (int Columns, int Rows) cells)
     {
+        if (cells.Columns <= 0 || cells.Rows <= 0)
+            return Vector2.Zero;
+        var m = block.Min;
+        var hash = (uint)(m.X * 73856093 ^ m.Y * 19349663 ^ m.Z * 83492791);
+        var column = (int)(hash % (uint)cells.Columns);
+        var row = (int)(hash / (uint)cells.Columns % (uint)cells.Rows);
+        return new Vector2(column / (float)cells.Columns, row / (float)cells.Rows);
+    }
+
+    private sealed class BatchBuilder(bool textured)
+    {
+        public bool Textured { get; } = textured;
         public List<int> Indices { get; } = new();
         public List<Matrix4x4> Transforms { get; } = new();
         public List<Vector4> Colors { get; } = new();
+        public List<Vector2> TexOffsets { get; } = new();
     }
 }

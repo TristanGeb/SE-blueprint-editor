@@ -3,17 +3,18 @@ using System.Numerics;
 namespace SEBlueprint.Core.Models;
 
 /// <summary>
-/// A renderable triangle mesh: one position and normal per corner, three corners per triangle
-/// (counter-clockwise when seen from outside). Kept free of any rendering library so it can be built
-/// on a background thread and tested.
+/// A renderable triangle mesh: one position, normal and (optionally) texture coordinate per corner,
+/// three corners per triangle (counter-clockwise when seen from outside). Kept free of any rendering
+/// library so it can be built on a background thread and tested.
 /// </summary>
 public sealed class MeshData
 {
-    public MeshData(Vector3[] positions, Vector3[] normals, int[] indices)
+    public MeshData(Vector3[] positions, Vector3[] normals, int[] indices, Vector2[]? texCoords = null)
     {
         Positions = positions;
         Normals = normals;
         Indices = indices;
+        TexCoords = texCoords is { Length: > 0 } && texCoords.Length == positions.Length ? texCoords : null;
     }
 
     public Vector3[] Positions { get; }
@@ -22,6 +23,9 @@ public sealed class MeshData
 
     public int[] Indices { get; }
 
+    /// <summary>Texture coordinates per corner, or null if the mesh can't be textured.</summary>
+    public Vector2[]? TexCoords { get; }
+
     public int TriangleCount => Indices.Length / 3;
 
     /// <summary>
@@ -29,8 +33,13 @@ public sealed class MeshData
     /// <paramref name="smoothingAngleDegrees"/> share a smoothed normal (curved surfaces look round);
     /// sharper edges keep separate normals (hard edges stay crisp).
     /// </summary>
-    public static MeshData FromTriangles(IReadOnlyList<Vector3> positions, IReadOnlyList<int> indices, float smoothingAngleDegrees = 35f)
+    public static MeshData FromTriangles(
+        IReadOnlyList<Vector3> positions,
+        IReadOnlyList<int> indices,
+        IReadOnlyList<Vector2>? texCoords = null,
+        float smoothingAngleDegrees = 35f)
     {
+        var hasUv = texCoords is not null && texCoords.Count == positions.Count;
         var triangleCount = indices.Count / 3;
         var faceNormals = new Vector3[triangleCount];
         var valid = new bool[triangleCount];
@@ -65,6 +74,7 @@ public sealed class MeshData
         var cosLimit = MathF.Cos(smoothingAngleDegrees * MathF.PI / 180f);
         var outPositions = new List<Vector3>(triangleCount * 3);
         var outNormals = new List<Vector3>(triangleCount * 3);
+        var outUv = hasUv ? new List<Vector2>(triangleCount * 3) : null;
         for (var t = 0; t < triangleCount; t++)
         {
             if (!valid[t])
@@ -72,7 +82,8 @@ public sealed class MeshData
             var fn = faceNormals[t];
             for (var k = 0; k < 3; k++)
             {
-                var p = positions[indices[3 * t + k]];
+                var index = indices[3 * t + k];
+                var p = positions[index];
                 var sum = Vector3.Zero;
                 foreach (var other in byPosition[p])
                 {
@@ -81,16 +92,14 @@ public sealed class MeshData
                 }
                 outPositions.Add(p);
                 outNormals.Add(sum.LengthSquared() > 1e-12f ? Vector3.Normalize(sum) : fn);
+                outUv?.Add(texCoords![index]);
             }
         }
 
-        var outIndices = new int[outPositions.Count];
-        for (var i = 0; i < outIndices.Length; i++)
-            outIndices[i] = i;
-        return new MeshData(outPositions.ToArray(), outNormals.ToArray(), outIndices);
+        return new MeshData(outPositions.ToArray(), outNormals.ToArray(), Sequence(outPositions.Count), outUv?.ToArray());
     }
 
-    /// <summary>Combines several meshes into one.</summary>
+    /// <summary>Combines several meshes into one. Texture coordinates are kept only if every mesh has them.</summary>
     public static MeshData Combine(IReadOnlyList<MeshData> meshes)
     {
         if (meshes.Count == 1)
@@ -98,16 +107,31 @@ public sealed class MeshData
         var positions = new List<Vector3>();
         var normals = new List<Vector3>();
         var indices = new List<int>();
+        var keepUv = meshes.All(m => m.TexCoords is not null);
+        var uv = keepUv ? new List<Vector2>() : null;
         foreach (var m in meshes)
         {
             var offset = positions.Count;
             positions.AddRange(m.Positions);
             normals.AddRange(m.Normals);
             indices.AddRange(m.Indices.Select(i => i + offset));
+            uv?.AddRange(m.TexCoords!);
         }
-        return new MeshData(positions.ToArray(), normals.ToArray(), indices.ToArray());
+        return new MeshData(positions.ToArray(), normals.ToArray(), indices.ToArray(), uv?.ToArray());
     }
+
+    /// <summary>A copy with every texture coordinate multiplied by <paramref name="scale"/>.</summary>
+    public MeshData WithTexCoordScale(Vector2 scale) =>
+        TexCoords is null ? this : new MeshData(Positions, Normals, Indices, TexCoords.Select(t => t * scale).ToArray());
 
     /// <summary>A unit cube centered on the origin (each side 1), used for unknown blocks and as a fallback.</summary>
     public static MeshData UnitCube { get; } = ArmorShapes.Hull(ArmorShapes.CubeCorners);
+
+    private static int[] Sequence(int count)
+    {
+        var result = new int[count];
+        for (var i = 0; i < count; i++)
+            result[i] = i;
+        return result;
+    }
 }

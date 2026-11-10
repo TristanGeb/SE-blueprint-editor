@@ -22,6 +22,12 @@ public sealed record BlockDefinition(
     /// </summary>
     public string? CubeTopology { get; init; }
 
+    /// <summary>
+    /// For armor-style blocks: the model of the first face tile (e.g. "Models\Cubes\Large\Armor\SquarePlate.mwm").
+    /// Its material tells us which texture the armor uses (light vs heavy, large vs small).
+    /// </summary>
+    public string? ArmorTileModel { get; init; }
+
     /// <summary>Offset of the model from the block's center, in model space (meters). Almost always zero.</summary>
     public System.Numerics.Vector3 ModelOffset { get; init; }
 

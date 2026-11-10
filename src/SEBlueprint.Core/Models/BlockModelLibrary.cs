@@ -22,8 +22,12 @@ public enum ModelDetail
     Full,
 }
 
-/// <summary>One drawable part of a block's look: a mesh plus how it's colored.</summary>
-public sealed record BlockVisualPart(MeshData Mesh, PartAppearance Appearance);
+/// <summary>One drawable part of a block's look: a mesh, how it's colored, and (optionally) its textures.</summary>
+public sealed record BlockVisualPart(MeshData Mesh, PartAppearance Appearance, MaterialTextures? Textures = null)
+{
+    /// <summary>True if this part can be drawn with its texture.</summary>
+    public bool IsTextured => Textures is not null && Mesh.TexCoords is not null;
+}
 
 /// <summary>
 /// What a block type looks like: its parts, and whether the meshes are in meters (real models)
@@ -37,6 +41,12 @@ public sealed class BlockVisual
 
     /// <summary>True for unit-block meshes (armor shapes, boxes) that are scaled to the block's size.</summary>
     public required bool IsUnitShape { get; init; }
+
+    /// <summary>
+    /// Armor textures hold a grid of pattern variants (columns × rows); each block shows one cell, picked from
+    /// its position so neighbouring blocks differ, like in the game. (0, 0) for textures without variants.
+    /// </summary>
+    public (int Columns, int Rows) PatternCells { get; init; }
 
     public static BlockVisual Box { get; } = new()
     {
@@ -56,13 +66,26 @@ public sealed class BlockModelLibrary
     private readonly ConcurrentDictionary<string, BlockVisual> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="contentFolder">The game's Content folder, or null to only use boxes and armor shapes.</param>
-    public BlockModelLibrary(string? contentFolder, ModelDetail detail)
+    /// <param name="useTextures">Whether to draw the game's textures (off = flat colors only).</param>
+    public BlockModelLibrary(string? contentFolder, ModelDetail detail, bool useTextures = true)
     {
         _contentFolder = contentFolder;
         Detail = detail;
+        UseTextures = useTextures && contentFolder is not null;
     }
 
     public ModelDetail Detail { get; }
+
+    public bool UseTextures { get; }
+
+    /// <summary>The game's Content folder (texture paths are relative to it), or null if the game wasn't found.</summary>
+    public string? ContentFolder => _contentFolder;
+
+    /// <summary>
+    /// Size of one armor pattern cell in texture coordinates. Read from the game's armor tiles: a full face of
+    /// SquarePlate / HeavySquarePlate covers u 0..0.25, v 0..0.5, i.e. the texture is a 4 × 2 grid of variants.
+    /// </summary>
+    private static readonly System.Numerics.Vector2 ArmorCell = new(0.25f, 0.5f);
 
     private int _failedModels;
 
@@ -79,15 +102,42 @@ public sealed class BlockModelLibrary
 
         if (ArmorShapes.Get(definition.CubeTopology) is { } shape)
         {
-            return _cache.GetOrAdd("shape:" + definition.CubeTopology, _ => new BlockVisual
+            // Light and heavy armor share shapes but not textures, so the tile model is part of the key.
+            var key = $"shape:{definition.CubeTopology}|{definition.ArmorTileModel}";
+            return _cache.GetOrAdd(key, _ =>
             {
-                Key = "shape:" + definition.CubeTopology,
-                Parts = new[] { new BlockVisualPart(shape, PartAppearance.Paint) },
-                IsUnitShape = true,
+                var textures = ArmorTextures(definition.ArmorTileModel);
+                return new BlockVisual
+                {
+                    Key = key,
+                    Parts = new[]
+                    {
+                        new BlockVisualPart(textures is null ? shape : shape.WithTexCoordScale(ArmorCell), PartAppearance.Paint, textures),
+                    },
+                    IsUnitShape = true,
+                    PatternCells = textures is null ? (0, 0) : (4, 2),
+                };
             });
         }
 
         return BlockVisual.Box;
+    }
+
+    /// <summary>The textures of an armor face tile (e.g. light vs heavy armor), or null if unavailable.</summary>
+    private MaterialTextures? ArmorTextures(string? tileModel)
+    {
+        if (tileModel is null || _contentFolder is null)
+            return null;
+        try
+        {
+            var main = MwmReader.Read(Resolve(tileModel));
+            var geometry = main.GeometryAsset is { } asset ? MwmReader.Read(Resolve(asset)) : main;
+            return geometry.Parts.Select(MaterialTextures.FromPart).FirstOrDefault(t => t is not null);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or EndOfStreamException or FormatException or ArgumentException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private BlockVisual LoadModel(string relativePath)
@@ -97,21 +147,22 @@ public sealed class BlockModelLibrary
             var main = MwmReader.Read(Resolve(relativePath));
             var geometry = PickLod(main);
 
-            // Merge parts that look the same so each block type needs as few draw calls as possible.
+            // Merge parts that look the same and use the same texture, so each block type needs as few draw
+            // calls as possible.
             var parts = new List<BlockVisualPart>();
             foreach (var group in geometry.Parts
-                         .Select(p => (Part: p, Look: PartAppearance.FromMaterial(p.MaterialName, p.Technique)))
+                         .Select(p => (Part: p, Look: PartAppearance.FromMaterial(p.MaterialName, p.Technique), Textures: MaterialTextures.FromPart(p)))
                          .Where(x => x.Look is not null && x.Part.Indices.Length >= 3)
-                         .GroupBy(x => x.Look!.Value))
+                         .GroupBy(x => (x.Look!.Value, x.Look.Value.Kind == PartKind.Glass ? null : x.Textures)))
             {
                 var indices = group.SelectMany(x => x.Part.Indices).ToList();
                 // The game stores triangles clockwise (DirectX style); we need counter-clockwise.
                 // Checked across all ~1300 vanilla models: ~90% are inside-out without this flip.
                 if (!geometry.SwapWindingOrder)
                     FlipWinding(indices);
-                var mesh = MeshData.FromTriangles(geometry.Positions, indices);
+                var mesh = MeshData.FromTriangles(geometry.Positions, indices, geometry.TexCoords);
                 if (mesh.TriangleCount > 0)
-                    parts.Add(new BlockVisualPart(mesh, group.Key));
+                    parts.Add(new BlockVisualPart(mesh, group.Key.Value, group.Key.Item2));
             }
 
             if (parts.Count == 0)

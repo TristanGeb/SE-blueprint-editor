@@ -21,6 +21,9 @@ public sealed class AppSettings
     /// <summary>How detailed block models are in the 3D view.</summary>
     public SEBlueprint.Core.Models.ModelDetail ModelDetail { get; set; } = SEBlueprint.Core.Models.ModelDetail.Medium;
 
+    /// <summary>Draw the game's textures (off = flat colors).</summary>
+    public bool ShowTextures { get; set; } = true;
+
     public static AppSettings Load()
     {
         try

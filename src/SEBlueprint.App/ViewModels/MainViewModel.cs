@@ -72,10 +72,13 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Current model detail level (bound to the View → Model detail menu).</summary>
     public ModelDetail ModelDetail => _settings.ModelDetail;
 
+    /// <summary>Whether textures are drawn (bound to View → Show textures).</summary>
+    public bool ShowTextures => _settings.ShowTextures;
+
     private void UseGameFolder(string gameFolder)
     {
         _contentFolder = GamePaths.ContentFolder(gameFolder);
-        _models = new BlockModelLibrary(_contentFolder, _settings.ModelDetail);
+        _models = new BlockModelLibrary(_contentFolder, _settings.ModelDetail, _settings.ShowTextures);
     }
 
     [RelayCommand]
@@ -86,7 +89,17 @@ public sealed partial class MainViewModel : ObservableObject
         _settings.ModelDetail = detail;
         _settings.Save();
         OnPropertyChanged(nameof(ModelDetail));
-        _models = new BlockModelLibrary(_contentFolder, detail);
+        _models = new BlockModelLibrary(_contentFolder, detail, _settings.ShowTextures);
+        await RebuildSceneAsync();
+    }
+
+    [RelayCommand]
+    private async Task ToggleTexturesAsync()
+    {
+        _settings.ShowTextures = !_settings.ShowTextures;
+        _settings.Save();
+        OnPropertyChanged(nameof(ShowTextures));
+        _models = new BlockModelLibrary(_contentFolder, _settings.ModelDetail, _settings.ShowTextures);
         await RebuildSceneAsync();
     }
 

@@ -62,6 +62,9 @@ public static class MwmReader
         }
 
         var positions = Seek("Vertices") ? ReadPositions(reader) : Array.Empty<Vector3>();
+        var texCoords = Seek("TexCoords0") ? ReadTexCoords(reader) : Array.Empty<Vector2>();
+        if (texCoords.Length != positions.Length)
+            texCoords = Array.Empty<Vector2>(); // mismatched data is useless; draw untextured instead
         var parts = new List<MwmMeshPart>();
         if (Seek("MeshParts"))
         {
@@ -107,6 +110,7 @@ public static class MwmReader
         {
             Version = version,
             Positions = positions,
+            TexCoords = texCoords,
             Parts = parts,
             SwapWindingOrder = swap,
             BoundsMin = min,
@@ -128,6 +132,20 @@ public static class MwmReader
             var z = (float)BitConverter.UInt16BitsToHalf(reader.ReadUInt16());
             var w = (float)BitConverter.UInt16BitsToHalf(reader.ReadUInt16());
             result[i] = new Vector3(x, y, z) * w;
+        }
+        return result;
+    }
+
+    /// <summary>Texture coordinates are packed as 2 half-floats (u, v), DirectX convention (v grows downward).</summary>
+    private static Vector2[] ReadTexCoords(BinaryReader reader)
+    {
+        var count = reader.ReadInt32();
+        var result = new Vector2[count];
+        for (var i = 0; i < count; i++)
+        {
+            var u = (float)BitConverter.UInt16BitsToHalf(reader.ReadUInt16());
+            var v = (float)BitConverter.UInt16BitsToHalf(reader.ReadUInt16());
+            result[i] = new Vector2(u, v);
         }
         return result;
     }
