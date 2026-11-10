@@ -425,6 +425,8 @@ test-results/
 # Mac bundle stuff
 *.dmg
 *.app
+# ...but not our WPF project folder, which *.app matches on case-insensitive Windows
+!/src/SEBlueprint.App/
 
 # content below from: https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
 # General
