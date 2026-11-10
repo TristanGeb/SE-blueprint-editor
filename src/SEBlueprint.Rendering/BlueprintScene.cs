@@ -91,6 +91,25 @@ public sealed class BlueprintScene
         }
     }
 
+    /// <summary>The 8 corners of every block's box, for fitting the camera tightly around the actual ship shape.</summary>
+    public IEnumerable<Vector3> BlockCorners
+    {
+        get
+        {
+            foreach (var grid in _grids.Values)
+            {
+                foreach (var box in grid.Data.BoxTransforms)
+                {
+                    for (var c = 0; c < 8; c++)
+                    {
+                        var corner = new Vector3((c & 1) == 0 ? -0.5f : 0.5f, (c & 2) == 0 ? -0.5f : 0.5f, (c & 4) == 0 ? -0.5f : 0.5f);
+                        yield return Vector3.Transform(corner, box);
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>Total triangles drawn, for the status bar.</summary>
     public long TriangleCount => _grids.Values
         .SelectMany(g => g.Data.Batches)
@@ -175,7 +194,15 @@ public sealed class BlueprintScene
                 : new InstanceParameter { DiffuseColor = color };
         }
 
-        var shiny = look.Kind == PartKind.Fixed && look.Color.X > 0.6f;
+        // Highlights are white whatever the paint, like the game's metal: they keep the shape readable even on
+        // near-black paint (where diffuse lighting alone leaves everything flat black).
+        var (specular, shininess) = look.Kind switch
+        {
+            PartKind.Paint => (0.35f, 24f),
+            PartKind.Fixed when look.Color.X > 0.6f => (0.6f, 60f), // chrome
+            PartKind.Fixed => (0.25f, 24f),
+            _ => (0.12f, 20f),
+        };
         return new InstancingMeshGeometryModel3D
         {
             Geometry = GpuMesh(batch.Part.Mesh),
@@ -187,10 +214,8 @@ public sealed class BlueprintScene
             {
                 DiffuseColor = new HelixToolkit.Maths.Color4(1f, 1f, 1f, 1f),
                 AmbientColor = new HelixToolkit.Maths.Color4(0.3f, 0.3f, 0.3f, 1f),
-                SpecularColor = shiny
-                    ? new HelixToolkit.Maths.Color4(0.6f, 0.6f, 0.6f, 1f)
-                    : new HelixToolkit.Maths.Color4(0.12f, 0.12f, 0.12f, 1f),
-                SpecularShininess = shiny ? 60f : 20f,
+                SpecularColor = new HelixToolkit.Maths.Color4(specular, specular, specular, 1f),
+                SpecularShininess = shininess,
             },
         };
     }

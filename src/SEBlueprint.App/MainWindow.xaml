@@ -10,7 +10,9 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
-        Height="850" Width="1350"
+        Height="800" Width="1300"
+        WindowStartupLocation="CenterScreen"
+        WindowState="Maximized"
         AllowDrop="True">
 
     <Window.InputBindings>
@@ -231,7 +233,7 @@
             <!-- 3D viewport -->
             <hx:Viewport3DX x:Name="Viewport"
                             Grid.Column="2"
-                            BackgroundColor="#1E2228"
+                            BackgroundColor="#4A515C"
                             ShowCoordinateSystem="True"
                             ShowViewCube="True"
                             FXAALevel="Low"
@@ -244,13 +246,16 @@
                                           NearPlaneDistance="0.1" FarPlaneDistance="100000" />
                 </hx:Viewport3DX.Camera>
                 <hx:AmbientLight3D Color="#505560" />
-                <hx:DirectionalLight3D Color="#E0E0E0"
+                <!-- Key light follows the camera so whatever you look at is lit. -->
+                <hx:DirectionalLight3D Color="#D0D0D0"
                                        Direction="{Binding Camera.LookDirection, ElementName=Viewport}" />
+                <!-- Fixed light from above, so faces turned away from the camera aren't flat black. -->
+                <hx:DirectionalLight3D Color="#9098A0" Direction="-0.3,-1,-0.4" />
                 <hx:GroupModel3D x:Name="SceneHost" />
             </hx:Viewport3DX>
 
             <TextBlock Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Foreground="#8090A0" FontSize="16" TextAlignment="Center" IsHitTestVisible="False"
+                       Foreground="#D0D8E0" FontSize="16" TextAlignment="Center" IsHitTestVisible="False"
                        Text="File → Open blueprint… (Ctrl+O)&#10;or drop a blueprint folder here">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">

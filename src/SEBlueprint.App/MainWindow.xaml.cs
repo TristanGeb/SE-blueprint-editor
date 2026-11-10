@@ -119,18 +119,39 @@ public partial class MainWindow : Window
             return;
 
         var center = (bounds.Min + bounds.Max) / 2f;
-        var radius = Math.Max((bounds.Max - bounds.Min).Length() / 2f, 1f);
-
-        // Fit the bounding sphere inside the narrower of the horizontal and vertical field of view.
-        var aspect = Math.Max(Viewport.ActualWidth, 1) / Math.Max(Viewport.ActualHeight, 1);
-        var horizontal = camera.FieldOfView * Math.PI / 180;
-        var vertical = 2 * Math.Atan(Math.Tan(horizontal / 2) / aspect);
-        var distance = radius / Math.Sin(Math.Min(horizontal, vertical) / 2) * 1.05;
 
         var look = camera.LookDirection;
         if (look.Length < 1e-6)
             look = new System.Windows.Media.Media3D.Vector3D(-1, -1, -1);
         look.Normalize();
+
+        // Camera axes (forward, right, up) as System.Numerics vectors.
+        var forward = new System.Numerics.Vector3((float)look.X, (float)look.Y, (float)look.Z);
+        var upHint = new System.Numerics.Vector3((float)camera.UpDirection.X, (float)camera.UpDirection.Y, (float)camera.UpDirection.Z);
+        var right = System.Numerics.Vector3.Cross(forward, upHint);
+        if (right.LengthSquared() < 1e-8f)
+            right = System.Numerics.Vector3.Cross(forward, System.Numerics.Vector3.UnitX);
+        right = System.Numerics.Vector3.Normalize(right);
+        var up = System.Numerics.Vector3.Cross(right, forward);
+
+        // FieldOfView is horizontal; derive the vertical one from the viewport's shape.
+        var aspect = Math.Max(Viewport.ActualWidth, 1) / Math.Max(Viewport.ActualHeight, 1);
+        var tanH = Math.Tan(camera.FieldOfView * Math.PI / 360);
+        var tanV = tanH / aspect;
+
+        // For every block corner, how far back the camera must be for that corner to be on screen.
+        // Using block corners rather than the overall bounding box keeps diagonal views tight.
+        double distance = 1;
+        foreach (var p in _vm.Scene.BlockCorners)
+        {
+            var corner = p - center;
+            var x = Math.Abs(System.Numerics.Vector3.Dot(corner, right));
+            var y = Math.Abs(System.Numerics.Vector3.Dot(corner, up));
+            var z = System.Numerics.Vector3.Dot(corner, forward);
+            distance = Math.Max(distance, Math.Max(x / tanH, y / tanV) - z);
+        }
+        distance *= 1.05; // a little margin
+
         look *= distance; // the camera orbits around Position + LookDirection, i.e. the ship's center
 
         camera.Position = new System.Windows.Media.Media3D.Point3D(
@@ -138,6 +159,10 @@ public partial class MainWindow : Window
         camera.LookDirection = look;
         camera.NearPlaneDistance = Math.Max(0.05, distance / 2000);
         camera.FarPlaneDistance = distance * 50;
+
+        // Helix only redraws on its own when the mouse moves the camera; changing it from code needs
+        // an explicit redraw, otherwise the new view only appears after the next mouse drag.
+        Viewport.InvalidateRender();
     }
 
     // PreviewKeyDown runs before any control (tree, viewport) can swallow the key.
