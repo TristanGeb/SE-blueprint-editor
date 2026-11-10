@@ -33,6 +33,12 @@ public sealed class MwmModel
     /// <summary>Lower-detail versions of the model (relative paths without extension), from most to least detailed.</summary>
     public IReadOnlyList<MwmLod> Lods { get; init; } = Array.Empty<MwmLod>();
 
+    /// <summary>
+    /// Named points inside the model ("dummies"). The game uses them for interaction areas, conveyor ports and,
+    /// importantly, "subpart_X" dummies that mark where moving parts (turret heads, rotor tops, doors) attach.
+    /// </summary>
+    public IReadOnlyList<MwmDummy> Dummies { get; init; } = Array.Empty<MwmDummy>();
+
     public bool HasGeometry => Positions.Length > 0 && Parts.Any(p => p.Indices.Length > 0);
 
     public int TriangleCount => Parts.Sum(p => p.Indices.Length) / 3;
@@ -53,3 +59,6 @@ public sealed class MwmMeshPart
 }
 
 public sealed record MwmLod(float Distance, string Model);
+
+/// <summary>A named point with a position/rotation (row-vector matrix) and free-form properties.</summary>
+public sealed record MwmDummy(string Name, Matrix4x4 Matrix, IReadOnlyDictionary<string, string> Properties);

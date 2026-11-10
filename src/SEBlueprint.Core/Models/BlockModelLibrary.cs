@@ -140,29 +140,24 @@ public sealed class BlockModelLibrary
         }
     }
 
+    /// <summary>How deep subparts may nest (turret base → head → barrels is 3).</summary>
+    private const int MaxSubpartDepth = 5;
+
     private BlockVisual LoadModel(string relativePath)
     {
         try
         {
-            var main = MwmReader.Read(Resolve(relativePath));
-            var geometry = PickLod(main);
+            // Collect the triangles of the model and all its subparts, grouped by look + texture, so each
+            // block type needs as few draw calls as possible.
+            var groups = new Dictionary<(PartAppearance Look, MaterialTextures? Textures), GeometryBuilder>();
+            AddModel(relativePath, System.Numerics.Matrix4x4.Identity, depth: 0, groups, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
-            // Merge parts that look the same and use the same texture, so each block type needs as few draw
-            // calls as possible.
             var parts = new List<BlockVisualPart>();
-            foreach (var group in geometry.Parts
-                         .Select(p => (Part: p, Look: PartAppearance.FromMaterial(p.MaterialName, p.Technique), Textures: MaterialTextures.FromPart(p)))
-                         .Where(x => x.Look is not null && x.Part.Indices.Length >= 3)
-                         .GroupBy(x => (x.Look!.Value, x.Look.Value.Kind == PartKind.Glass ? null : x.Textures)))
+            foreach (var (key, builder) in groups)
             {
-                var indices = group.SelectMany(x => x.Part.Indices).ToList();
-                // The game stores triangles clockwise (DirectX style); we need counter-clockwise.
-                // Checked across all ~1300 vanilla models: ~90% are inside-out without this flip.
-                if (!geometry.SwapWindingOrder)
-                    FlipWinding(indices);
-                var mesh = MeshData.FromTriangles(geometry.Positions, indices, geometry.TexCoords);
+                var mesh = MeshData.FromTriangles(builder.Positions, builder.Indices, builder.HasTexCoords ? builder.TexCoords : null);
                 if (mesh.TriangleCount > 0)
-                    parts.Add(new BlockVisualPart(mesh, group.Key.Value, group.Key.Item2));
+                    parts.Add(new BlockVisualPart(mesh, key.Look, key.Textures));
             }
 
             if (parts.Count == 0)
@@ -173,6 +168,106 @@ public sealed class BlockModelLibrary
         {
             Interlocked.Increment(ref _failedModels);
             return BlockVisual.Box;
+        }
+    }
+
+    /// <summary>
+    /// Adds one model's triangles (moved by <paramref name="transform"/>) and then, recursively, its subparts.
+    /// Subparts are the moving pieces the game attaches at runtime: turret heads and barrels, door panels,
+    /// drill heads, landing gear... The parent model marks each with a "subpart_*" dummy whose "file" property
+    /// names the subpart's model (in the same folder) and whose matrix says where it sits.
+    /// </summary>
+    private void AddModel(string relativePath, System.Numerics.Matrix4x4 transform, int depth,
+        Dictionary<(PartAppearance, MaterialTextures?), GeometryBuilder> groups, HashSet<string> visiting)
+    {
+        if (depth > MaxSubpartDepth || !visiting.Add(relativePath))
+            return; // guard against broken files that reference themselves
+
+        var main = MwmReader.Read(Resolve(relativePath));
+        var geometry = PickLod(main);
+
+        // A mirroring transform turns triangles inside-out, so the winding flip must be undone.
+        var mirrored = transform.GetDeterminant() < 0;
+        foreach (var part in geometry.Parts)
+        {
+            var look = PartAppearance.FromMaterial(part.MaterialName, part.Technique);
+            if (look is null || part.Indices.Length < 3)
+                continue;
+            var textures = look.Value.Kind == PartKind.Glass ? null : MaterialTextures.FromPart(part);
+            if (!groups.TryGetValue((look.Value, textures), out var builder))
+                groups[(look.Value, textures)] = builder = new GeometryBuilder();
+
+            // The game stores triangles clockwise (DirectX style); we need counter-clockwise.
+            // Checked across all ~1300 vanilla models: ~90% are inside-out without this flip.
+            builder.Add(geometry, part.Indices, transform, flip: !geometry.SwapWindingOrder ^ mirrored);
+        }
+
+        foreach (var dummy in main.Dummies)
+        {
+            if (!dummy.Name.StartsWith("subpart_", StringComparison.OrdinalIgnoreCase) ||
+                !dummy.Properties.TryGetValue("file", out var file) || string.IsNullOrWhiteSpace(file))
+                continue;
+
+            var folder = Path.GetDirectoryName(relativePath) ?? string.Empty;
+            var subpartPath = Path.Combine(folder, file.Trim());
+            if (!File.Exists(Resolve(subpartPath)))
+                continue;
+
+            // Dummy matrices carry the dummy box's size as scale; the game normalizes it away for subparts.
+            var placement = WithoutScale(dummy.Matrix);
+            try
+            {
+                AddModel(subpartPath, placement * transform, depth + 1, groups, visiting);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or EndOfStreamException or FormatException)
+            {
+                // A broken subpart shouldn't hide the rest of the block.
+            }
+        }
+
+        visiting.Remove(relativePath);
+    }
+
+    private static System.Numerics.Matrix4x4 WithoutScale(System.Numerics.Matrix4x4 m)
+    {
+        var x = System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(m.M11, m.M12, m.M13));
+        var y = System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(m.M21, m.M22, m.M23));
+        var z = System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(m.M31, m.M32, m.M33));
+        return new System.Numerics.Matrix4x4(
+            x.X, x.Y, x.Z, 0,
+            y.X, y.Y, y.Z, 0,
+            z.X, z.Y, z.Z, 0,
+            m.M41, m.M42, m.M43, 1);
+    }
+
+    /// <summary>Accumulates triangles from several models (with their own transforms) into one mesh.</summary>
+    private sealed class GeometryBuilder
+    {
+        public List<System.Numerics.Vector3> Positions { get; } = new();
+        public List<System.Numerics.Vector2> TexCoords { get; } = new();
+        public List<int> Indices { get; } = new();
+        public bool HasTexCoords { get; private set; } = true;
+
+        public void Add(MwmModel geometry, int[] indices, System.Numerics.Matrix4x4 transform, bool flip)
+        {
+            var offset = Positions.Count;
+            var identity = transform.IsIdentity;
+            foreach (var p in geometry.Positions)
+                Positions.Add(identity ? p : System.Numerics.Vector3.Transform(p, transform));
+            if (geometry.TexCoords.Length == geometry.Positions.Length)
+                TexCoords.AddRange(geometry.TexCoords);
+            else
+            {
+                HasTexCoords = false;
+                TexCoords.AddRange(new System.Numerics.Vector2[geometry.Positions.Length]);
+            }
+
+            for (var i = 0; i + 2 < indices.Length; i += 3)
+            {
+                Indices.Add(indices[i] + offset);
+                Indices.Add((flip ? indices[i + 2] : indices[i + 1]) + offset);
+                Indices.Add((flip ? indices[i + 1] : indices[i + 2]) + offset);
+            }
         }
     }
 

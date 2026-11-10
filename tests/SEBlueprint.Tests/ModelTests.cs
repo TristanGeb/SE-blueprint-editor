@@ -123,6 +123,17 @@ public class MwmReaderTests
                 w.Write(withLods ? 1 : 0);
                 if (withLods) { w.Write(20f); w.Write(@"Models\Test_LOD1"); w.Write(""); }
             }),
+            ("Dummies", w =>
+            {
+                w.Write(1);
+                w.Write("subpart_Head");
+                // Row-vector matrix: 0.1 scale on the axes (the dummy box size), translation (0, 2, 0)
+                foreach (var f in new[] { 0.1f, 0, 0, 0, 0, 0.1f, 0, 0, 0, 0, 0.1f, 0, 0, 2f, 0, 1 })
+                    w.Write(f);
+                w.Write(2);
+                w.Write("file"); w.Write("TestHead");
+                w.Write("IsNull"); w.Write("True");
+            }),
             ("ModelInfo", w => w.Write(0)),
         };
 
@@ -168,6 +179,18 @@ public class MwmReaderTests
         Assert.Equal(new Vector3(1, 1.25f, 0), model.BoundsMax);
         Assert.Equal(@"Models\Test_LOD1", Assert.Single(model.Lods).Model);
         Assert.Equal(2, model.TriangleCount);
+    }
+
+    [Fact]
+    public void Reads_subpart_dummies()
+    {
+        var model = MwmReader.Read(new MemoryStream(BuildMwm()));
+
+        var dummy = Assert.Single(model.Dummies);
+        Assert.Equal("subpart_Head", dummy.Name);
+        Assert.Equal("TestHead", dummy.Properties["file"]);
+        Assert.Equal(new Vector3(0, 2, 0), dummy.Matrix.Translation);
+        Assert.Equal(0.1f, dummy.Matrix.M11);
     }
 
     [Fact]

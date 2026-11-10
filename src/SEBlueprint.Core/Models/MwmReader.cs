@@ -93,6 +93,28 @@ public static class MwmReader
                 asset = null;
         }
 
+        var dummies = new List<MwmDummy>();
+        if (Seek("Dummies"))
+        {
+            var count = reader.ReadInt32();
+            for (var i = 0; i < count; i++)
+            {
+                var name = reader.ReadString();
+                var m = new float[16];
+                for (var k = 0; k < 16; k++)
+                    m[k] = reader.ReadSingle();
+                var properties = new Dictionary<string, string>(StringComparer.Ordinal);
+                var propertyCount = reader.ReadInt32();
+                for (var k = 0; k < propertyCount; k++)
+                    properties[reader.ReadString()] = reader.ReadString();
+                dummies.Add(new MwmDummy(name, new Matrix4x4(
+                    m[0], m[1], m[2], m[3],
+                    m[4], m[5], m[6], m[7],
+                    m[8], m[9], m[10], m[11],
+                    m[12], m[13], m[14], m[15]), properties));
+            }
+        }
+
         var lods = new List<MwmLod>();
         if (Seek("LODs"))
         {
@@ -117,6 +139,7 @@ public static class MwmReader
             BoundsMax = max,
             GeometryAsset = asset,
             Lods = lods,
+            Dummies = dummies,
         };
     }
 
