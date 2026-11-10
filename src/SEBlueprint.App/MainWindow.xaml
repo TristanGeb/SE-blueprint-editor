@@ -8,23 +8,60 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
-        Height="800" Width="1300"
+        Height="850" Width="1350"
         AllowDrop="True">
 
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenBlueprintCommand}" />
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
+        <KeyBinding Key="S" Modifiers="Control+Shift" Command="{Binding SaveAsNewCommand}" />
+        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
+        <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
+        <KeyBinding Key="Z" Modifiers="Control+Shift" Command="{Binding RedoCommand}" />
+        <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}" />
+        <KeyBinding Key="Escape" Command="{Binding ClearSelectionCommand}" />
+        <KeyBinding Key="P" Command="{Binding PaintSelectedCommand}" />
     </Window.InputBindings>
 
-    <DockPanel x:Name="Root">
+    <Window.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="6,6,6,4" />
+        </Style>
+        <Style x:Key="SliderLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="Gray" />
+        </Style>
+        <Style x:Key="SliderValue" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
         <!-- Menu -->
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
                 <MenuItem Header="_Open blueprint…" InputGestureText="Ctrl+O" Command="{Binding OpenBlueprintCommand}" />
-                <MenuItem Header="Show blueprint in _Explorer" Command="{Binding OpenBlueprintFolderCommand}" />
                 <Separator />
+                <MenuItem Header="_Save" InputGestureText="Ctrl+S" Command="{Binding SaveCommand}"
+                          ToolTip="Overwrite this blueprint. The first save keeps the original as bp.sbc.bak." />
+                <MenuItem Header="Save as _new blueprint…" InputGestureText="Ctrl+Shift+S" Command="{Binding SaveAsNewCommand}"
+                          ToolTip="Save a copy under a new name and leave the original untouched." />
+                <Separator />
+                <MenuItem Header="Show blueprint in _Explorer" Command="{Binding OpenBlueprintFolderCommand}" />
                 <MenuItem Header="Set _game folder…" Command="{Binding ChooseGameFolderCommand}" />
                 <Separator />
                 <MenuItem Header="E_xit" Command="{Binding ExitCommand}" />
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="{Binding UndoHeader}" InputGestureText="Ctrl+Z" Command="{Binding UndoCommand}" />
+                <MenuItem Header="{Binding RedoHeader}" InputGestureText="Ctrl+Y" Command="{Binding RedoCommand}" />
+                <Separator />
+                <MenuItem Header="_Paint selected" InputGestureText="P" Command="{Binding PaintSelectedCommand}" />
+                <MenuItem Header="_Delete selected" InputGestureText="Del" Command="{Binding DeleteSelectedCommand}" />
+                <Separator />
+                <MenuItem Header="Clear _selection" InputGestureText="Esc" Command="{Binding ClearSelectionCommand}" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="_Zoom to fit" InputGestureText="F" Click="OnZoomExtents" />
@@ -40,17 +77,18 @@
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="340" MinWidth="200" />
+                <ColumnDefinition Width="350" MinWidth="220" />
                 <ColumnDefinition Width="5" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left panel: blueprint tree + properties -->
+            <!-- Left panel: blueprint tree, properties, paint -->
             <Grid Grid.Column="0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" MinHeight="100" />
                     <RowDefinition Height="5" />
-                    <RowDefinition Height="240" MinHeight="80" />
+                    <RowDefinition Height="220" MinHeight="80" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TreeView x:Name="BlueprintTree"
@@ -58,7 +96,8 @@
                           ItemsSource="{Binding TreeRoots}"
                           SelectedItemChanged="OnTreeSelectedItemChanged"
                           VirtualizingPanel.IsVirtualizing="True"
-                          VirtualizingPanel.VirtualizationMode="Recycling">
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          ToolTip="Select a grid or block type to select all of its blocks">
                     <TreeView.ItemContainerStyle>
                         <Style TargetType="TreeViewItem">
                             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
@@ -75,8 +114,9 @@
 
                 <GridSplitter Grid.Row="1" HorizontalAlignment="Stretch" ResizeDirection="Rows" />
 
+                <!-- Properties -->
                 <DockPanel Grid.Row="2">
-                    <TextBlock DockPanel.Dock="Top" Text="Properties" FontWeight="SemiBold" Margin="6,4" />
+                    <TextBlock DockPanel.Dock="Top" Text="Properties" Style="{StaticResource SectionHeader}" />
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding SelectedProperties}" Margin="6,0,6,6">
                             <ItemsControl.ItemTemplate>
@@ -107,6 +147,62 @@
                         </ItemsControl>
                     </ScrollViewer>
                 </DockPanel>
+
+                <!-- Paint -->
+                <StackPanel Grid.Row="3" DataContext="{Binding Paint}">
+                    <Separator />
+                    <TextBlock Text="Paint" Style="{StaticResource SectionHeader}" />
+                    <Grid Margin="6,0,6,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="22" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="34" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.RowSpan="3" Width="54" Height="54" Margin="0,0,10,0"
+                                Background="{Binding PreviewBrush}" BorderBrush="Gray" BorderThickness="1" CornerRadius="3" />
+
+                        <TextBlock Grid.Column="1" Text="H" Style="{StaticResource SliderLabel}" />
+                        <Slider Grid.Column="2" Minimum="0" Maximum="360" Value="{Binding Hue}"
+                                IsSnapToTickEnabled="True" TickFrequency="1" Margin="0,2">
+                            <Slider.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="#FF0000" Offset="0" />
+                                    <GradientStop Color="#FFFF00" Offset="0.167" />
+                                    <GradientStop Color="#00FF00" Offset="0.333" />
+                                    <GradientStop Color="#00FFFF" Offset="0.5" />
+                                    <GradientStop Color="#0000FF" Offset="0.667" />
+                                    <GradientStop Color="#FF00FF" Offset="0.833" />
+                                    <GradientStop Color="#FF0000" Offset="1" />
+                                </LinearGradientBrush>
+                            </Slider.Background>
+                        </Slider>
+                        <TextBlock Grid.Column="3" Text="{Binding Hue, StringFormat={}{0:0}}" Style="{StaticResource SliderValue}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="S" Style="{StaticResource SliderLabel}" />
+                        <Slider Grid.Row="1" Grid.Column="2" Minimum="0" Maximum="100" Value="{Binding Saturation}"
+                                IsSnapToTickEnabled="True" TickFrequency="1" Margin="0,2" />
+                        <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding Saturation, StringFormat={}{0:0}}" Style="{StaticResource SliderValue}" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="V" Style="{StaticResource SliderLabel}" />
+                        <Slider Grid.Row="2" Grid.Column="2" Minimum="0" Maximum="100" Value="{Binding Value}"
+                                IsSnapToTickEnabled="True" TickFrequency="1" Margin="0,2" />
+                        <TextBlock Grid.Row="2" Grid.Column="3" Text="{Binding Value, StringFormat={}{0:0}}" Style="{StaticResource SliderValue}" />
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="6,6,6,8">
+                        <Button Content="Pick from selection" Padding="8,3" Margin="0,0,6,0"
+                                Command="{Binding DataContext.PickColorFromSelectionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                ToolTip="Set the sliders to the first selected block's color" />
+                        <Button Content="Paint selected (P)" Padding="8,3"
+                                Command="{Binding DataContext.PaintSelectedCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    </StackPanel>
+                </StackPanel>
             </Grid>
 
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" ResizeDirection="Columns" />

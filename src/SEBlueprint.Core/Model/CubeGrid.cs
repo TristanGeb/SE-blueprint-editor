@@ -32,7 +32,14 @@ public sealed class CubeGrid
 
     public Blueprint Blueprint { get; }
 
+    /// <summary>
+    /// The grid's blocks. Kept in the same order as the &lt;MyObjectBuilder_CubeBlock&gt; elements in
+    /// <see cref="CubeBlocksElement"/>; edit commands rely on that.
+    /// </summary>
     public List<Block> Blocks { get; } = new();
+
+    /// <summary>The &lt;CubeBlocks&gt; element that holds the block XML (created if missing).</summary>
+    public XElement CubeBlocksElement => XmlHelpers.GetOrCreate(Element, "CubeBlocks", "GridSizeEnum");
 
     public string DisplayName
     {

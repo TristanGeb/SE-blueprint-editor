@@ -14,6 +14,9 @@ public abstract partial class TreeNodeViewModel : ObservableObject
 
     public abstract string Header { get; }
 
+    /// <summary>Every block under this node. Selecting the node selects all of these.</summary>
+    public virtual IEnumerable<Block> Blocks => Children.SelectMany(c => c.Blocks);
+
     public ObservableCollection<TreeNodeViewModel> Children { get; } = new();
 
     [ObservableProperty]
@@ -53,22 +56,26 @@ public sealed class GridNodeViewModel : TreeNodeViewModel
 
     public CubeGrid Grid { get; }
 
+    public override IEnumerable<Block> Blocks => Grid.Blocks;
+
     public override string Header => $"{Grid.DisplayName}  ({Grid.GridSize} grid, {Grid.Blocks.Count:N0} blocks)";
 }
 
 public sealed class BlockGroupNodeViewModel : TreeNodeViewModel
 {
-    private readonly string _name;
     private readonly int _count;
 
     public BlockGroupNodeViewModel(TreeNodeViewModel parent, string name, int count)
         : base(parent)
     {
-        _name = name;
+        Name = name;
         _count = count;
     }
 
-    public override string Header => $"{_name}  ×{_count:N0}";
+    /// <summary>The block type's display name, e.g. "Light Armor Block".</summary>
+    public string Name { get; }
+
+    public override string Header => $"{Name}  ×{_count:N0}";
 }
 
 public sealed class BlockNodeViewModel : TreeNodeViewModel
@@ -85,4 +92,6 @@ public sealed class BlockNodeViewModel : TreeNodeViewModel
     public Block Block { get; }
 
     public override string Header { get; }
+
+    public override IEnumerable<Block> Blocks => new[] { Block };
 }

@@ -35,7 +35,20 @@ public sealed class Blueprint
     public List<CubeGrid> Grids { get; } = new();
 
     /// <summary>The blueprint's name (from &lt;Id Subtype="..."/&gt;), which matches its folder name.</summary>
-    public string Name => ShipBlueprint.Element("Id")?.Attribute("Subtype")?.Value ?? "(unnamed)";
+    public string Name
+    {
+        get => ShipBlueprint.Element("Id")?.Attribute("Subtype")?.Value ?? "(unnamed)";
+        set
+        {
+            var id = ShipBlueprint.Element("Id");
+            if (id is null)
+            {
+                id = new XElement("Id", new XAttribute("Type", "MyObjectBuilder_ShipBlueprintDefinition"));
+                ShipBlueprint.AddFirst(id);
+            }
+            id.SetAttributeValue("Subtype", value);
+        }
+    }
 
     public string? DisplayName => ShipBlueprint.ChildValue("DisplayName");
 

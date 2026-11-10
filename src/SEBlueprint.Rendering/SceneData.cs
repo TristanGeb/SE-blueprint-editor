@@ -27,8 +27,19 @@ public sealed class GridSceneData
     /// <summary>Transform from this grid's local space to the scene (main grid's space).</summary>
     public required Matrix4x4 GridToScene { get; init; }
 
-    /// <summary>Reverse lookup: which instance index a block is drawn with.</summary>
-    public int IndexOf(Block block) => Array.IndexOf(Blocks, block);
+    private Dictionary<Block, int>? _indexByBlock;
+
+    /// <summary>Reverse lookup: which instance index a block is drawn with, or -1.</summary>
+    public int IndexOf(Block block)
+    {
+        if (_indexByBlock is null)
+        {
+            _indexByBlock = new Dictionary<Block, int>(Blocks.Length);
+            for (var i = 0; i < Blocks.Length; i++)
+                _indexByBlock[Blocks[i]] = i;
+        }
+        return _indexByBlock.TryGetValue(block, out var index) ? index : -1;
+    }
 }
 
 public sealed class BlueprintSceneData

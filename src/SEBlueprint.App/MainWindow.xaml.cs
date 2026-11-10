@@ -30,6 +30,13 @@ public partial class MainWindow : Window
         Drop += OnDrop;
     }
 
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (!_vm.ConfirmDiscardChanges())
+            e.Cancel = true;
+    }
+
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         // Allow opening a blueprint from the command line: SEBlueprint.App.exe "path\to\bp.sbc"
@@ -59,7 +66,8 @@ public partial class MainWindow : Window
             return;
 
         var block = args.HitTestResult is { } hit ? _vm.Scene?.BlockFromHit(hit) : null;
-        _vm.SelectBlockFromViewport(block);
+        var toggle = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        _vm.SelectBlockFromViewport(block, toggle);
     }
 
     private void OnTreeSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e) =>
