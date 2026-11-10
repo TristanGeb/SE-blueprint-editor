@@ -58,6 +58,35 @@ public sealed class BlueprintScene
     /// <summary>The node to put into the viewport.</summary>
     public GroupModel3D Root { get; }
 
+    /// <summary>
+    /// Bounding box of every block in the scene, or null if there are no blocks. Computed from our own data
+    /// so "zoom to fit" works even before the GPU has finished setting up the models.
+    /// </summary>
+    public (Vector3 Min, Vector3 Max)? Bounds
+    {
+        get
+        {
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            var any = false;
+            foreach (var grid in _grids.Values)
+            {
+                foreach (var box in grid.Data.BoxTransforms)
+                {
+                    for (var c = 0; c < 8; c++)
+                    {
+                        var corner = new Vector3((c & 1) == 0 ? -0.5f : 0.5f, (c & 2) == 0 ? -0.5f : 0.5f, (c & 4) == 0 ? -0.5f : 0.5f);
+                        var p = Vector3.Transform(corner, box);
+                        min = Vector3.Min(min, p);
+                        max = Vector3.Max(max, p);
+                    }
+                    any = true;
+                }
+            }
+            return any ? (min, max) : null;
+        }
+    }
+
     /// <summary>Total triangles drawn, for the status bar.</summary>
     public long TriangleCount => _grids.Values
         .SelectMany(g => g.Data.Batches)

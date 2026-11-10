@@ -235,7 +235,9 @@
                             ShowCoordinateSystem="True"
                             ShowViewCube="True"
                             FXAALevel="Low"
-                            EnableSwapChainRendering="True"
+                            EnableSwapChainRendering="False"
+                            IsZoomEnabled="True"
+                            ZoomAroundMouseDownPoint="True"
                             MouseDown3D="OnViewportMouseDown3D">
                 <hx:Viewport3DX.Camera>
                     <hx:PerspectiveCamera Position="30,30,30" LookDirection="-30,-30,-30" UpDirection="0,1,0"

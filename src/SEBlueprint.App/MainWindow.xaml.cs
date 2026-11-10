@@ -53,8 +53,7 @@ public partial class MainWindow : Window
         if (_vm.Scene is { } scene)
         {
             SceneHost.Children.Add(scene.Root);
-            // Wait one frame so the new models are attached before measuring their bounds.
-            Dispatcher.BeginInvoke(() => Viewport.ZoomExtents(200), System.Windows.Threading.DispatcherPriority.Loaded);
+            ZoomToFit(0);
         }
     }
 
@@ -80,14 +79,31 @@ public partial class MainWindow : Window
             item.BringIntoView();
     }
 
-    private void OnZoomExtents(object sender, RoutedEventArgs e) => Viewport.ZoomExtents(300);
+    private void OnZoomExtents(object sender, RoutedEventArgs e) => ZoomToFit();
 
-    protected override void OnKeyDown(KeyEventArgs e)
+    /// <summary>
+    /// Points the camera so the whole blueprint is in view. Uses the scene's own bounding box: Helix's
+    /// built-in ZoomExtents measures the shared block meshes (one block at the origin), not where the
+    /// thousands of instanced copies actually are, so it zoomed onto a single block.
+    /// </summary>
+    private void ZoomToFit(double animationMs = 300)
     {
-        base.OnKeyDown(e);
-        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.None && !(e.OriginalSource is TextBox))
+        if (_vm.Scene?.Bounds is not { } bounds)
+            return;
+        var size = bounds.Max - bounds.Min;
+        var box = new System.Windows.Media.Media3D.Rect3D(
+            bounds.Min.X, bounds.Min.Y, bounds.Min.Z,
+            Math.Max(size.X, 0.5), Math.Max(size.Y, 0.5), Math.Max(size.Z, 0.5));
+        Viewport.ZoomExtents(box, animationMs);
+    }
+
+    // PreviewKeyDown runs before any control (tree, viewport) can swallow the key.
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.None && e.OriginalSource is not TextBox)
         {
-            Viewport.ZoomExtents(300);
+            ZoomToFit();
             e.Handled = true;
         }
     }
