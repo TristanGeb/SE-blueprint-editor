@@ -7,6 +7,7 @@
         xmlns:vm="clr-namespace:SEBlueprint.App.ViewModels"
         xmlns:conv="clr-namespace:SEBlueprint.App.Converters"
         xmlns:models="clr-namespace:SEBlueprint.Core.Models;assembly=SEBlueprint.Core"
+        xmlns:render="clr-namespace:SEBlueprint.Rendering;assembly=SEBlueprint.Rendering"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
@@ -73,6 +74,20 @@
                 <Separator />
                 <MenuItem Header="Show _textures" Command="{Binding ToggleTexturesCommand}"
                           IsChecked="{Binding ShowTextures, Mode=OneWay}" />
+                <MenuItem Header="Texture _quality" IsEnabled="{Binding ShowTextures}">
+                    <MenuItem Header="_Low (256 px, least memory)"
+                              Command="{Binding SetTextureQualityCommand}" CommandParameter="{x:Static render:TextureQuality.Low}"
+                              IsChecked="{Binding TextureQuality, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Low}" />
+                    <MenuItem Header="_Medium (512 px)"
+                              Command="{Binding SetTextureQualityCommand}" CommandParameter="{x:Static render:TextureQuality.Medium}"
+                              IsChecked="{Binding TextureQuality, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Medium}" />
+                    <MenuItem Header="_High (1024 px)"
+                              Command="{Binding SetTextureQualityCommand}" CommandParameter="{x:Static render:TextureQuality.High}"
+                              IsChecked="{Binding TextureQuality, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=High}" />
+                    <MenuItem Header="_Full (2048 px, most memory)"
+                              Command="{Binding SetTextureQualityCommand}" CommandParameter="{x:Static render:TextureQuality.Full}"
+                              IsChecked="{Binding TextureQuality, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Full}" />
+                </MenuItem>
                 <MenuItem Header="Model _detail">
                     <MenuItem Header="_Boxes only (fastest)"
                               Command="{Binding SetModelDetailCommand}" CommandParameter="{x:Static models:ModelDetail.Boxes}"

@@ -75,8 +75,25 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Whether textures are drawn (bound to View → Show textures).</summary>
     public bool ShowTextures => _settings.ShowTextures;
 
+    /// <summary>Current texture resolution limit (bound to View → Texture quality).</summary>
+    public TextureQuality TextureQuality => _settings.TextureQuality;
+
+    [RelayCommand]
+    private async Task SetTextureQualityAsync(TextureQuality quality)
+    {
+        if (quality == _settings.TextureQuality)
+            return;
+        _settings.TextureQuality = quality;
+        _settings.Save();
+        OnPropertyChanged(nameof(TextureQuality));
+        TextureCache.SetQuality(quality);
+        if (_settings.ShowTextures)
+            await RebuildSceneAsync();
+    }
+
     private void UseGameFolder(string gameFolder)
     {
+        TextureCache.SetQuality(_settings.TextureQuality);
         _contentFolder = GamePaths.ContentFolder(gameFolder);
         _models = new BlockModelLibrary(_contentFolder, _settings.ModelDetail, _settings.ShowTextures);
     }

@@ -24,6 +24,9 @@ public sealed class AppSettings
     /// <summary>Draw the game's textures (off = flat colors).</summary>
     public bool ShowTextures { get; set; } = true;
 
+    /// <summary>Maximum texture resolution; lower uses less memory and loads faster.</summary>
+    public SEBlueprint.Rendering.TextureQuality TextureQuality { get; set; } = SEBlueprint.Rendering.TextureQuality.High;
+
     public static AppSettings Load()
     {
         try

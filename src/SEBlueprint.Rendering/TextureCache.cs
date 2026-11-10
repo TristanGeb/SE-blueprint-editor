@@ -16,10 +16,37 @@ namespace SEBlueprint.Rendering;
 /// File reading and decoding happen on a background thread (<see cref="Preload"/>); creating the GPU texture
 /// happens on the UI thread (<see cref="Get"/>).
 /// </summary>
+/// <summary>
+/// How large textures may be. The value is the maximum width/height in pixels; larger game textures are loaded
+/// at a reduced size (using their smaller built-in mip levels). Each step down quarters texture memory.
+/// </summary>
+public enum TextureQuality
+{
+    Low = 256,
+    Medium = 512,
+    High = 1024,
+    Full = 2048,
+}
+
 public static class TextureCache
 {
-    /// <summary>Largest size kept, to bound memory: uncompressed textures are 4× bigger than the game's files.</summary>
-    public const int MaxSize = 1024;
+    /// <summary>Largest width/height kept. Uncompressed textures are 4× bigger than the game's files, so this bounds memory.</summary>
+    public static int MaxSize { get; private set; } = (int)TextureQuality.High;
+
+    /// <summary>
+    /// Changes the texture size limit. Already-loaded textures were made for the old limit, so they are dropped
+    /// and reloaded on demand. Call on the UI thread, before rebuilding the scene.
+    /// </summary>
+    public static void SetQuality(TextureQuality quality)
+    {
+        var size = (int)quality;
+        if (size == MaxSize)
+            return;
+        MaxSize = size;
+        Prepared.Clear();
+        Models.Clear();
+        GC.Collect(); // release the old textures' memory now rather than whenever the GC gets round to it
+    }
 
     private static readonly ConcurrentDictionary<string, byte[]?> Prepared = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, TextureModel?> Models = new(StringComparer.OrdinalIgnoreCase);
