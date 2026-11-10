@@ -14,6 +14,7 @@ using SEBlueprint.Core.Editing;
 using SEBlueprint.Core.Geometry;
 using SEBlueprint.Core.IO;
 using SEBlueprint.Core.Model;
+using SEBlueprint.Core.Models;
 using SEBlueprint.Rendering;
 
 namespace SEBlueprint.App.ViewModels;
@@ -24,6 +25,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly AppSettings _settings = AppSettings.Load();
     private Task<DefinitionRepository>? _definitionsTask;
+    private string? _contentFolder;
+    private BlockModelLibrary _models = new(null, ModelDetail.Boxes);
     private Dictionary<Block, BlockNodeViewModel> _nodeByBlock = new();
     private bool _syncingSelection;
 
@@ -66,6 +69,49 @@ public sealed partial class MainViewModel : ObservableObject
 
     public DefinitionRepository Definitions { get; private set; } = DefinitionRepository.Empty;
 
+    /// <summary>Current model detail level (bound to the View → Model detail menu).</summary>
+    public ModelDetail ModelDetail => _settings.ModelDetail;
+
+    private void UseGameFolder(string gameFolder)
+    {
+        _contentFolder = GamePaths.ContentFolder(gameFolder);
+        _models = new BlockModelLibrary(_contentFolder, _settings.ModelDetail);
+    }
+
+    [RelayCommand]
+    private async Task SetModelDetailAsync(ModelDetail detail)
+    {
+        if (detail == _settings.ModelDetail)
+            return;
+        _settings.ModelDetail = detail;
+        _settings.Save();
+        OnPropertyChanged(nameof(ModelDetail));
+        _models = new BlockModelLibrary(_contentFolder, detail);
+        await RebuildSceneAsync();
+    }
+
+    /// <summary>Rebuilds the 3D scene from the blueprint in memory (keeps unsaved edits).</summary>
+    private async Task RebuildSceneAsync()
+    {
+        if (Blueprint is not { } blueprint)
+            return;
+        IsBusy = true;
+        StatusText = "Loading block models…";
+        try
+        {
+            var defs = Definitions;
+            var models = _models;
+            var data = await Task.Run(() => SceneBuilder.Build(blueprint, defs, models));
+            Scene = new BlueprintScene(data, defs, models);
+            Scene.ShowSelection(SelectedBlocks);
+            StatusText = $"Model detail: {models.Detail}. {Scene.TriangleCount:N0} triangles.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     // ───────────────────────────── Startup ─────────────────────────────
 
     /// <summary>Called once when the window opens: finds the game and loads block definitions in the background.</summary>
@@ -79,6 +125,7 @@ public sealed partial class MainViewModel : ObservableObject
         {
             _settings.GameFolder = gameFolder;
             _settings.Save();
+            UseGameFolder(gameFolder!);
             StatusText = "Loading block definitions…";
             _definitionsTask = Task.Run(() => DefinitionRepository.LoadFromGame(GamePaths.ContentFolder(gameFolder!)));
             try
@@ -178,6 +225,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         _settings.GameFolder = folder;
         _settings.Save();
+        UseGameFolder(folder!);
         IsBusy = true;
         StatusText = "Loading block definitions…";
         try
@@ -220,13 +268,15 @@ public sealed partial class MainViewModel : ObservableObject
                 Definitions = await _definitionsTask; // in case a blueprint is opened before definitions finish
 
             var defs = Definitions;
+            var models = _models;
             var sw = Stopwatch.StartNew();
 
-            // Parsing, tree building and instance data all happen off the UI thread so the window stays responsive.
+            // Parsing, model loading, tree building and instance data all happen off the UI thread
+            // so the window stays responsive.
             var (blueprint, sceneData, roots) = await Task.Run(() =>
             {
                 var bp = BlueprintIO.Load(path);
-                var data = SceneBuilder.Build(bp, defs);
+                var data = SceneBuilder.Build(bp, defs, models);
                 var nodes = bp.Grids
                     .OrderByDescending(g => g.Blocks.Count)
                     .Select(g => new GridNodeViewModel(g, defs))
@@ -244,7 +294,7 @@ public sealed partial class MainViewModel : ObservableObject
             Session = new EditorSession(blueprint);
             Session.Changed += OnSessionChanged;
             Session.HistoryChanged += OnHistoryChanged;
-            Scene = new BlueprintScene(sceneData, defs); // GPU objects must be created on the UI thread
+            Scene = new BlueprintScene(sceneData, defs, models); // GPU objects must be created on the UI thread
 
             TreeRoots.Clear();
             _nodeByBlock = new Dictionary<Block, BlockNodeViewModel>();
@@ -259,7 +309,7 @@ public sealed partial class MainViewModel : ObservableObject
             var unknown = blueprint.AllBlocks.Count(b => defs.Get(b).IsUnknown);
             StatusText = $"{blueprint.Name}: {blueprint.Grids.Count} grid(s), {blueprint.TotalBlockCount:N0} blocks"
                 + (unknown > 0 ? $", {unknown:N0} unknown (magenta)" : string.Empty)
-                + $" — loaded in {sw.ElapsedMilliseconds:N0} ms.   {ViewportHelp}";
+                + $", {Scene.TriangleCount:N0} triangles — loaded in {sw.ElapsedMilliseconds:N0} ms.   {ViewportHelp}";
         }
         catch (Exception ex)
         {

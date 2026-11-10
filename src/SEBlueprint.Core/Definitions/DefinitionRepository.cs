@@ -119,6 +119,7 @@ public sealed class DefinitionRepository
         if (size.X <= 0 || size.Y <= 0 || size.Z <= 0)
             size = Vector3I.One;
 
+        var model = def.ChildValue("Model");
         return new BlockDefinition(
             typeId,
             subtypeId,
@@ -126,6 +127,10 @@ public sealed class DefinitionRepository
             cubeSize,
             size,
             def.ChildValue("Icon"),
-            def.ChildValue("Model"));
+            string.IsNullOrWhiteSpace(model) ? null : model.Trim())
+        {
+            CubeTopology = def.Element("CubeDefinition")?.ChildValue("CubeTopology"),
+            ModelOffset = XmlHelpers.ReadVector3(def.Element("ModelOffset")) ?? System.Numerics.Vector3.Zero,
+        };
     }
 }

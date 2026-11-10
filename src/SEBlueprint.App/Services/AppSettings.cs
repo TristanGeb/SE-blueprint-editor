@@ -18,6 +18,9 @@ public sealed class AppSettings
     /// <summary>Folder the Open dialog starts in.</summary>
     public string? LastOpenFolder { get; set; }
 
+    /// <summary>How detailed block models are in the 3D view.</summary>
+    public SEBlueprint.Core.Models.ModelDetail ModelDetail { get; set; } = SEBlueprint.Core.Models.ModelDetail.Medium;
+
     public static AppSettings Load()
     {
         try

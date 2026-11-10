@@ -5,6 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
         xmlns:vm="clr-namespace:SEBlueprint.App.ViewModels"
+        xmlns:conv="clr-namespace:SEBlueprint.App.Converters"
+        xmlns:models="clr-namespace:SEBlueprint.Core.Models;assembly=SEBlueprint.Core"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{Binding WindowTitle}"
@@ -24,6 +26,7 @@
     </Window.InputBindings>
 
     <Window.Resources>
+        <conv:EnumEqualsConverter x:Key="EnumEquals" />
         <Style x:Key="SectionHeader" TargetType="TextBlock">
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="6,6,6,4" />
@@ -65,6 +68,24 @@
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="_Zoom to fit" InputGestureText="F" Click="OnZoomExtents" />
+                <Separator />
+                <MenuItem Header="Model _detail">
+                    <MenuItem Header="_Boxes only (fastest)"
+                              Command="{Binding SetModelDetailCommand}" CommandParameter="{x:Static models:ModelDetail.Boxes}"
+                              IsChecked="{Binding ModelDetail, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Boxes}" />
+                    <MenuItem Header="_Low"
+                              Command="{Binding SetModelDetailCommand}" CommandParameter="{x:Static models:ModelDetail.Low}"
+                              IsChecked="{Binding ModelDetail, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Low}" />
+                    <MenuItem Header="_Medium (recommended)"
+                              Command="{Binding SetModelDetailCommand}" CommandParameter="{x:Static models:ModelDetail.Medium}"
+                              IsChecked="{Binding ModelDetail, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Medium}" />
+                    <MenuItem Header="_High"
+                              Command="{Binding SetModelDetailCommand}" CommandParameter="{x:Static models:ModelDetail.High}"
+                              IsChecked="{Binding ModelDetail, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=High}" />
+                    <MenuItem Header="_Full (slow on big ships)"
+                              Command="{Binding SetModelDetailCommand}" CommandParameter="{x:Static models:ModelDetail.Full}"
+                              IsChecked="{Binding ModelDetail, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Full}" />
+                </MenuItem>
             </MenuItem>
         </Menu>
 
