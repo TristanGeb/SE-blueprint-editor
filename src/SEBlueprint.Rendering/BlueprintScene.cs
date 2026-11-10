@@ -190,7 +190,7 @@ public sealed class BlueprintScene
             var c = batch.Colors[i];
             var color = new HelixToolkit.Maths.Color4(c.X, c.Y, c.Z, c.W);
             parameters[i] = look.Kind == PartKind.Emissive
-                ? new InstanceParameter { DiffuseColor = color, EmissiveColor = new HelixToolkit.Maths.Color4(0.5f, 0.5f, 0.5f, 1f) }
+                ? new InstanceParameter { DiffuseColor = color, EmissiveColor = new HelixToolkit.Maths.Color4(0.25f, 0.25f, 0.25f, 1f) }
                 : new InstanceParameter { DiffuseColor = color };
             if (batch.TexOffsets is { } offsets)
                 parameters[i].TexCoordOffset = offsets[i];

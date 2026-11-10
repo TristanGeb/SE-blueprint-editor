@@ -31,8 +31,17 @@ public static class TextureCache
     /// <summary>Reads and prepares the given textures (skipping ones already done). Safe to call off the UI thread.</summary>
     public static void Preload(string contentFolder, IEnumerable<string> relativePaths)
     {
+        var before = Prepared.Count;
         Parallel.ForEach(relativePaths.Distinct(StringComparer.OrdinalIgnoreCase), path =>
             Prepared.GetOrAdd(FullPath(contentFolder, path), Prepare));
+
+        // Decoding leaves large temporary buffers behind (on .NET's large-object heap, which isn't compacted
+        // by default). Compact once after a batch of new textures so that memory goes back to Windows.
+        if (Prepared.Count != before)
+        {
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
+        }
     }
 
     /// <summary>The GPU texture for a path, or null if the file is missing or unreadable. UI thread only.</summary>
@@ -68,21 +77,24 @@ public static class TextureCache
 
             var width = (int)file.header.dwWidth;
             var height = (int)file.header.dwHeight;
-            var mips = new BcDecoder().DecodeAllMipMaps(file);
-            if (mips.Length == 0 || width <= 0 || height <= 0)
+            var mipData = file.Faces[0].MipMaps;
+            if (mipData.Length == 0 || width <= 0 || height <= 0)
                 return null;
 
-            // Skip the largest levels until the texture fits in MaxSize.
+            // Skip the largest levels until the texture fits in MaxSize. Only the kept levels are decoded:
+            // decoding a 4096² original just to throw it away cost ~100 MB of temporary memory per texture.
             var first = 0;
-            while (first < mips.Length - 1 && (width >> first > MaxSize || height >> first > MaxSize))
+            while (first < mipData.Length - 1 && (width >> first > MaxSize || height >> first > MaxSize))
                 first++;
 
+            var decoder = new BcDecoder();
+            var format = decoder.GetFormat(file);
             var levels = new List<(int W, int H, byte[] Rgba)>();
-            for (var level = first; level < mips.Length; level++)
+            for (var level = first; level < mipData.Length; level++)
             {
                 var w = Math.Max(1, width >> level);
                 var h = Math.Max(1, height >> level);
-                var pixels = mips[level];
+                var pixels = decoder.DecodeRaw(mipData[level].Data, w, h, format);
                 if (pixels.Length < w * h)
                     break;
                 var rgba = new byte[w * h * 4];

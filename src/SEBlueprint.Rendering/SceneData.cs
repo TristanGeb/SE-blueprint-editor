@@ -212,9 +212,11 @@ public static class SceneBuilder
     private static Vector4 ColorFor(PartAppearance look, Vector3 paint, bool textured) => (look.Kind, textured) switch
     {
         (PartKind.Glass, _) => new Vector4(look.Color, GlassAlpha),
-        (PartKind.Paint, true) => new Vector4(paint * PaintTextureBoost, 1f),
+        // Capped so white and other bright paints keep the texture's detail instead of washing out.
+        (PartKind.Paint, true) => new Vector4(Vector3.Min(paint * PaintTextureBoost, new Vector3(1.3f)), 1f),
         (PartKind.Paint, false) => new Vector4(paint, 1f),
-        (_, true) => new Vector4(look.Color * PaintTextureBoost, 1f),
+        // Capped so light materials (chrome, lights) don't blow out to pure white.
+        (_, true) => new Vector4(Vector3.Min(look.Color * PaintTextureBoost, new Vector3(0.85f)), 1f),
         _ => new Vector4(look.Color, 1f),
     };
 
