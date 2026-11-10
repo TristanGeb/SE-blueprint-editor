@@ -34,6 +34,7 @@ public sealed class BlueprintScene
     {
         _definitions = definitions;
         _models = models;
+        Blueprint = data.Blueprint;
         Root = new GroupModel3D();
 
         foreach (var gridData in data.Grids)
@@ -57,6 +58,9 @@ public sealed class BlueprintScene
 
     /// <summary>The node to put into the viewport.</summary>
     public GroupModel3D Root { get; }
+
+    /// <summary>The blueprint this scene draws.</summary>
+    public Blueprint Blueprint { get; }
 
     /// <summary>
     /// Bounding box of every block in the scene, or null if there are no blocks. Computed from our own data

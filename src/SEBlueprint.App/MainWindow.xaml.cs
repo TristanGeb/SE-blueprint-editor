@@ -6,6 +6,7 @@ using System.Windows.Input;
 using HelixToolkit.SharpDX;
 using HelixToolkit.Wpf.SharpDX;
 using SEBlueprint.App.ViewModels;
+using SEBlueprint.Core.Model;
 
 namespace SEBlueprint.App;
 
@@ -53,8 +54,34 @@ public partial class MainWindow : Window
         if (_vm.Scene is { } scene)
         {
             SceneHost.Children.Add(scene.Root);
-            ZoomToFit(0);
+
+            // Only frame the ship when a different blueprint was opened; rebuilding the same one
+            // (e.g. after changing model detail) keeps the user's camera.
+            if (!ReferenceEquals(scene.Blueprint, _framedBlueprint))
+            {
+                _framedBlueprint = scene.Blueprint;
+                ZoomToFitWhenReady();
+            }
         }
+    }
+
+    private Blueprint? _framedBlueprint;
+
+    /// <summary>
+    /// Frames the ship once the viewport has been laid out and drawn a frame. Doing it immediately
+    /// (while the window or viewport still has no size) leaves the camera where it was.
+    /// </summary>
+    private void ZoomToFitWhenReady()
+    {
+        var framesLeft = 2;
+        void OnRendering(object? sender, EventArgs e)
+        {
+            if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1 || --framesLeft > 0)
+                return;
+            System.Windows.Media.CompositionTarget.Rendering -= OnRendering;
+            ZoomToFit();
+        }
+        System.Windows.Media.CompositionTarget.Rendering += OnRendering;
     }
 
     private void OnViewportMouseDown3D(object? sender, RoutedEventArgs e)
@@ -82,19 +109,35 @@ public partial class MainWindow : Window
     private void OnZoomExtents(object sender, RoutedEventArgs e) => ZoomToFit();
 
     /// <summary>
-    /// Points the camera so the whole blueprint is in view. Uses the scene's own bounding box: Helix's
-    /// built-in ZoomExtents measures the shared block meshes (one block at the origin), not where the
-    /// thousands of instanced copies actually are, so it zoomed onto a single block.
+    /// Points the camera so the whole blueprint is in view, keeping the current viewing angle.
+    /// Uses the scene's own bounding box (Helix's ZoomExtents only measures the shared block meshes,
+    /// one block at the origin, not where the instanced copies are) and sets the camera directly.
     /// </summary>
-    private void ZoomToFit(double animationMs = 300)
+    private void ZoomToFit()
     {
-        if (_vm.Scene?.Bounds is not { } bounds)
+        if (_vm.Scene?.Bounds is not { } bounds || Viewport.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera camera)
             return;
-        var size = bounds.Max - bounds.Min;
-        var box = new System.Windows.Media.Media3D.Rect3D(
-            bounds.Min.X, bounds.Min.Y, bounds.Min.Z,
-            Math.Max(size.X, 0.5), Math.Max(size.Y, 0.5), Math.Max(size.Z, 0.5));
-        Viewport.ZoomExtents(box, animationMs);
+
+        var center = (bounds.Min + bounds.Max) / 2f;
+        var radius = Math.Max((bounds.Max - bounds.Min).Length() / 2f, 1f);
+
+        // Fit the bounding sphere inside the narrower of the horizontal and vertical field of view.
+        var aspect = Math.Max(Viewport.ActualWidth, 1) / Math.Max(Viewport.ActualHeight, 1);
+        var horizontal = camera.FieldOfView * Math.PI / 180;
+        var vertical = 2 * Math.Atan(Math.Tan(horizontal / 2) / aspect);
+        var distance = radius / Math.Sin(Math.Min(horizontal, vertical) / 2) * 1.05;
+
+        var look = camera.LookDirection;
+        if (look.Length < 1e-6)
+            look = new System.Windows.Media.Media3D.Vector3D(-1, -1, -1);
+        look.Normalize();
+        look *= distance; // the camera orbits around Position + LookDirection, i.e. the ship's center
+
+        camera.Position = new System.Windows.Media.Media3D.Point3D(
+            center.X - look.X, center.Y - look.Y, center.Z - look.Z);
+        camera.LookDirection = look;
+        camera.NearPlaneDistance = Math.Max(0.05, distance / 2000);
+        camera.FarPlaneDistance = distance * 50;
     }
 
     // PreviewKeyDown runs before any control (tree, viewport) can swallow the key.
