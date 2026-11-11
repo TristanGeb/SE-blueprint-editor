@@ -21,4 +21,5 @@ public interface IEditCommand
 /// <summary>What an edit touched, so the 3D view and tree can update only what's needed.</summary>
 /// <param name="Grids">Grids whose blocks changed.</param>
 /// <param name="StructureChanged">True if blocks were added or removed (the tree needs rebuilding), false for property changes like paint.</param>
-public sealed record EditChange(IReadOnlyCollection<CubeGrid> Grids, bool StructureChanged);
+/// <param name="PlacementChanged">True if a grid's world position/rotation changed, so the whole scene must be rebuilt.</param>
+public sealed record EditChange(IReadOnlyCollection<CubeGrid> Grids, bool StructureChanged, bool PlacementChanged = false);

@@ -24,9 +24,7 @@
         <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
         <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
         <KeyBinding Key="Z" Modifiers="Control+Shift" Command="{Binding RedoCommand}" />
-        <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}" />
         <KeyBinding Key="Escape" Command="{Binding ClearSelectionCommand}" />
-        <KeyBinding Key="P" Command="{Binding PaintSelectedCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
@@ -68,12 +66,27 @@
                 <Separator />
                 <MenuItem Header="_Paint selected" InputGestureText="P" Command="{Binding PaintSelectedCommand}" />
                 <MenuItem Header="_Delete selected" InputGestureText="Del" Command="{Binding DeleteSelectedCommand}" />
+                <MenuItem Header="_Align grid to selected block…" Command="{Binding AlignGridToSelectedCommand}"
+                          ToolTip="Turn the grid so the selected block (e.g. the cockpit) faces forward with its top up" />
                 <Separator />
                 <MenuItem Header="Clear _selection" InputGestureText="Esc" Command="{Binding ClearSelectionCommand}" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="_Zoom to fit" InputGestureText="F" Click="OnZoomExtents" />
                 <Separator />
+                <MenuItem Header="Show block _outlines" InputGestureText="O" Command="{Binding ToggleOutlinesCommand}"
+                          IsChecked="{Binding ShowOutlines, Mode=OneWay}" />
+                <MenuItem Header="Outline _width" IsEnabled="{Binding ShowOutlines}">
+                    <MenuItem Header="_Thin (1 px)"
+                              Command="{Binding SetOutlineWidthCommand}" CommandParameter="{x:Static render:OutlineWidth.Thin}"
+                              IsChecked="{Binding OutlineWidth, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Thin}" />
+                    <MenuItem Header="_Medium (2 px)"
+                              Command="{Binding SetOutlineWidthCommand}" CommandParameter="{x:Static render:OutlineWidth.Medium}"
+                              IsChecked="{Binding OutlineWidth, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Medium}" />
+                    <MenuItem Header="T_hick (3 px)"
+                              Command="{Binding SetOutlineWidthCommand}" CommandParameter="{x:Static render:OutlineWidth.Thick}"
+                              IsChecked="{Binding OutlineWidth, Mode=OneWay, Converter={StaticResource EnumEquals}, ConverterParameter=Thick}" />
+                </MenuItem>
                 <MenuItem Header="Show _textures" Command="{Binding ToggleTexturesCommand}"
                           IsChecked="{Binding ShowTextures, Mode=OneWay}" />
                 <MenuItem Header="Texture _quality" IsEnabled="{Binding ShowTextures}">
@@ -232,6 +245,88 @@
 
                         <!-- Edit workspace: paint tools -->
                         <DataTemplate DataType="{x:Type ws:EditWorkspaceViewModel}">
+                <StackPanel>
+                <!-- Tools: select or place blocks (one at a time) -->
+                <StackPanel DataContext="{Binding DataContext.Build, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <Separator />
+                    <TextBlock Text="Tool" Style="{StaticResource SectionHeader}" />
+                    <StackPanel Orientation="Horizontal" Margin="6,0,6,4">
+                        <RadioButton Content="Select (1)" IsChecked="{Binding IsSelectTool}" GroupName="EditTool" Margin="0,0,12,0"
+                                     ToolTip="Click blocks to select them" />
+                        <RadioButton Content="Place on face (2)" IsChecked="{Binding IsFaceTool}" GroupName="EditTool" Margin="0,0,12,0"
+                                     ToolTip="Click a block's face to put a new block against it, like in the game" />
+                        <RadioButton Content="Place on plane (3)" IsChecked="{Binding IsPlaneTool}" GroupName="EditTool"
+                                     ToolTip="Click on a flat grid layer to put a new block there, even in empty space" />
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding IsPlacing, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding Hint}" TextWrapping="Wrap" Foreground="Gray" Margin="6,0,6,4" />
+
+                        <!-- Work plane -->
+                        <Grid Margin="6,0,6,4" Visibility="{Binding IsPlaneTool, Converter={StaticResource BoolToVisibility}}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Plane" Foreground="Gray" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <RadioButton Content="Floor (Y)" IsChecked="{Binding IsPlaneY}" GroupName="PlaneAxis" Margin="0,0,10,0"
+                                             ToolTip="A horizontal layer" />
+                                <RadioButton Content="Side wall (X)" IsChecked="{Binding IsPlaneX}" GroupName="PlaneAxis" Margin="0,0,10,0"
+                                             ToolTip="A vertical layer running front to back" />
+                                <RadioButton Content="Cross wall (Z)" IsChecked="{Binding IsPlaneZ}" GroupName="PlaneAxis"
+                                             ToolTip="A vertical layer running left to right" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="1" Text="Layer" Foreground="Gray" VerticalAlignment="Center" Margin="0,4,8,0" />
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,0">
+                                <Button Content="−" Width="24" Command="{Binding LayerDownCommand}" ToolTip="Move the plane down one layer (PageDown)" />
+                                <TextBlock Text="{Binding PlaneLayer}" MinWidth="34" TextAlignment="Center" VerticalAlignment="Center" />
+                                <Button Content="+" Width="24" Command="{Binding LayerUpCommand}" ToolTip="Move the plane up one layer (PageUp)" />
+                                <Button Content="At selection" Padding="6,1" Margin="8,0,0,0" Command="{Binding PlaneAtSelectionCommand}"
+                                        ToolTip="Put the plane on the selected block's grid and layer" />
+                                <TextBlock Text="{Binding PlaneGridName, StringFormat=on {0}}" Foreground="Gray" VerticalAlignment="Center"
+                                           Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Block palette -->
+                        <Grid Margin="6,2,6,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="Search blocks by name" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <RadioButton Content="Large" IsChecked="{Binding IsLargePalette}" GroupName="PaletteSize" Margin="0,0,8,0" />
+                                <RadioButton Content="Small" IsChecked="{Binding IsSmallPalette}" GroupName="PaletteSize" />
+                            </StackPanel>
+                        </Grid>
+                        <ListBox ItemsSource="{Binding Palette}" SelectedItem="{Binding SelectedItem}" Height="170" Margin="6,2,6,4"
+                                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}" />
+                                        <TextBlock Text="{Binding Detail}" Foreground="Gray" FontSize="11" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <DockPanel Margin="6,0,6,4">
+                            <Button DockPanel.Dock="Right" Content="Copy selected block" Padding="6,1" Command="{Binding PickFromSelectionCommand}"
+                                    ToolTip="Place blocks like the selected one: same type, rotation and color" />
+                            <TextBlock Text="{Binding OrientationText}" Foreground="Gray" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       ToolTip="R / T / Y turn the block around the up, left-right and front-back axes. Hold Shift to turn the other way." />
+                        </DockPanel>
+                        <TextBlock Text="R / T / Y rotate (Shift = other way). New blocks use the paint color below. Esc stops placing."
+                                   TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="6,0,6,2" />
+                        <TextBlock Text="{Binding HoverText}" TextWrapping="Wrap" Margin="6,0,6,4" />
+                    </StackPanel>
+                </StackPanel>
                 <StackPanel DataContext="{Binding DataContext.Paint, RelativeSource={RelativeSource AncestorType=Window}}">
                     <Separator />
                     <TextBlock Text="Paint" Style="{StaticResource SectionHeader}" />
@@ -285,6 +380,7 @@
                         <Button Content="Paint selected (P)" Padding="8,3"
                                 Command="{Binding DataContext.PaintSelectedCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
                     </StackPanel>
+                </StackPanel>
                 </StackPanel>
                         </DataTemplate>
 
@@ -355,7 +451,9 @@
                             EnableSwapChainRendering="False"
                             IsZoomEnabled="True"
                             ZoomAroundMouseDownPoint="True"
-                            MouseDown3D="OnViewportMouseDown3D">
+                            MouseDown3D="OnViewportMouseDown3D"
+                            MouseMove="OnViewportMouseMove"
+                            MouseLeave="OnViewportMouseLeave">
                 <hx:Viewport3DX.Camera>
                     <hx:PerspectiveCamera Position="30,30,30" LookDirection="-30,-30,-30" UpDirection="0,1,0"
                                           NearPlaneDistance="0.1" FarPlaneDistance="100000" />

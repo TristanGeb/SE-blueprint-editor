@@ -26,6 +26,7 @@ public partial class MainWindow : Window
         Viewport.EffectsManager = _effectsManager;
 
         _vm.PropertyChanged += OnViewModelPropertyChanged;
+        _vm.ZoomToFitRequested += (_, _) => ZoomToFitWhenReady();
         Loaded += OnLoaded;
         Closed += (_, _) => _effectsManager.Dispose();
         Drop += OnDrop;
@@ -91,9 +92,57 @@ public partial class MainWindow : Window
         if (args.OriginalInputEventArgs is MouseButtonEventArgs { ChangedButton: not MouseButton.Left })
             return;
 
+        var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        if (_vm.Build.IsPlacing)
+        {
+            UpdatePlacementHover(args.OriginalInputEventArgs as MouseEventArgs);
+            _vm.Build.Click(pick: ctrl);
+            return;
+        }
+
         var block = args.HitTestResult is { } hit ? _vm.Scene?.BlockFromHit(hit) : null;
-        var toggle = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
-        _vm.SelectBlockFromViewport(block, toggle);
+        _vm.SelectBlockFromViewport(block, ctrl);
+    }
+
+    private void OnViewportMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_vm.Build.IsPlacing)
+            UpdatePlacementHover(e);
+    }
+
+    private void OnViewportMouseLeave(object sender, MouseEventArgs e) => _vm.Build.ClearHover();
+
+    /// <summary>Sends the ray under the mouse (in scene space) to the placement tool.</summary>
+    private void UpdatePlacementHover(MouseEventArgs? e)
+    {
+        var pos = e?.GetPosition(Viewport) ?? Mouse.GetPosition(Viewport);
+        if (MouseRay(pos) is { } ray)
+            _vm.Build.UpdateHover(ray.Origin, ray.Direction);
+    }
+
+    /// <summary>The camera ray through a point of the viewport, from the camera's position and field of view.</summary>
+    private (System.Numerics.Vector3 Origin, System.Numerics.Vector3 Direction)? MouseRay(Point pos)
+    {
+        if (Viewport.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera camera ||
+            Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1)
+            return null;
+
+        static System.Numerics.Vector3 V(System.Windows.Media.Media3D.Vector3D v) => new((float)v.X, (float)v.Y, (float)v.Z);
+        var forward = System.Numerics.Vector3.Normalize(V(camera.LookDirection));
+        var right = System.Numerics.Vector3.Cross(forward, V(camera.UpDirection));
+        if (right.LengthSquared() < 1e-8f)
+            return null;
+        right = System.Numerics.Vector3.Normalize(right);
+        var up = System.Numerics.Vector3.Cross(right, forward);
+
+        // FieldOfView is horizontal.
+        var tanH = (float)Math.Tan(camera.FieldOfView * Math.PI / 360);
+        var tanV = tanH * (float)(Viewport.ActualHeight / Viewport.ActualWidth);
+        var x = (float)(2 * pos.X / Viewport.ActualWidth - 1);
+        var y = (float)(1 - 2 * pos.Y / Viewport.ActualHeight);
+        var direction = forward + right * (x * tanH) + up * (y * tanV);
+        var origin = new System.Numerics.Vector3((float)camera.Position.X, (float)camera.Position.Y, (float)camera.Position.Z);
+        return (origin, direction);
     }
 
     private void OnTreeSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e) =>
@@ -173,14 +222,63 @@ public partial class MainWindow : Window
         Viewport.InvalidateRender();
     }
 
-    // PreviewKeyDown runs before any control (tree, viewport) can swallow the key.
+    // PreviewKeyDown runs before any control (tree, viewport) can swallow the key. Single-key shortcuts are handled
+    // here rather than as KeyBindings so they don't fire while typing in a text box (e.g. the block search).
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
-        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.None && e.OriginalSource is not TextBox)
+        if (e.OriginalSource is TextBox)
+            return;
+
+        var mods = Keyboard.Modifiers;
+
+        // Run Ctrl shortcuts (Ctrl+Z, Ctrl+S...) here and mark them handled. Otherwise the key also reaches the
+        // 3D view, whose built-in fly keys ignore Ctrl: Z moves the camera down, S moves it back, and so on.
+        if ((mods & ModifierKeys.Control) != 0)
         {
-            ZoomToFit();
-            e.Handled = true;
+            foreach (var binding in InputBindings.OfType<KeyBinding>())
+            {
+                if (!binding.Gesture.Matches(this, e))
+                    continue;
+                if (binding.Command?.CanExecute(binding.CommandParameter) == true)
+                    binding.Command.Execute(binding.CommandParameter);
+                e.Handled = true; // even when there's nothing to undo, don't let the camera move
+                return;
+            }
+            return;
+        }
+
+        if (mods is not (ModifierKeys.None or ModifierKeys.Shift))
+            return;
+        var shift = mods == ModifierKeys.Shift;
+        var build = _vm.Build;
+        var handled = true;
+
+        switch (e.Key)
+        {
+            case Key.F when !shift: ZoomToFit(); break;
+            case Key.P when !shift: Execute(_vm.PaintSelectedCommand); break;
+            case Key.O when !shift: Execute(_vm.ToggleOutlinesCommand); break;
+            case Key.Delete when !shift: Execute(_vm.DeleteSelectedCommand); break;
+            case Key.D1 or Key.NumPad1 when !shift && _vm.ActiveWorkspace.AllowsEditing: build.Tool = ViewModels.EditTool.Select; break;
+            case Key.D2 or Key.NumPad2 when !shift && _vm.ActiveWorkspace.AllowsEditing: build.Tool = ViewModels.EditTool.PlaceOnFace; break;
+            case Key.D3 or Key.NumPad3 when !shift && _vm.ActiveWorkspace.AllowsEditing: build.Tool = ViewModels.EditTool.PlaceOnPlane; break;
+
+            // Rotate the block being placed: R around the up axis, T around left-right, Y around front-back.
+            case Key.R when build.IsPlacing: build.Rotate(new SEBlueprint.Core.Math.Vector3I(0, shift ? -1 : 1, 0)); break;
+            case Key.T when build.IsPlacing: build.Rotate(new SEBlueprint.Core.Math.Vector3I(shift ? -1 : 1, 0, 0)); break;
+            case Key.Y when build.IsPlacing: build.Rotate(new SEBlueprint.Core.Math.Vector3I(0, 0, shift ? -1 : 1)); break;
+
+            case Key.PageUp when build.Tool == ViewModels.EditTool.PlaceOnPlane: build.LayerUpCommand.Execute(null); break;
+            case Key.PageDown when build.Tool == ViewModels.EditTool.PlaceOnPlane: build.LayerDownCommand.Execute(null); break;
+            default: handled = false; break;
+        }
+        e.Handled = handled;
+
+        static void Execute(System.Windows.Input.ICommand command)
+        {
+            if (command.CanExecute(null))
+                command.Execute(null);
         }
     }
 

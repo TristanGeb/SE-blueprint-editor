@@ -42,7 +42,7 @@ public sealed partial class MainViewModel : ObservableObject
     private BlueprintScene? _scene;
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(PaintSelectedCommand), nameof(DeleteSelectedCommand), nameof(PickColorFromSelectionCommand))]
+    [NotifyCanExecuteChangedFor(nameof(PaintSelectedCommand), nameof(DeleteSelectedCommand), nameof(PickColorFromSelectionCommand), nameof(AlignGridToSelectedCommand))]
     private IReadOnlyList<Block> _selectedBlocks = Array.Empty<Block>();
 
     [ObservableProperty]
@@ -56,6 +56,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public MainViewModel()
     {
+        Build = new BuildViewModel(this);
         Workspaces = new WorkspaceViewModel[] { new EditWorkspaceViewModel(this), new AnalyzeWorkspaceViewModel(this) };
         _activeWorkspace = Workspaces[0];
         foreach (var workspace in Workspaces)
@@ -67,7 +68,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>The workspace in use. It decides the bottom-left panel, whether editing is allowed, and the 3D colors.</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(PaintSelectedCommand), nameof(DeleteSelectedCommand), nameof(UndoCommand), nameof(RedoCommand))]
+    [NotifyCanExecuteChangedFor(nameof(PaintSelectedCommand), nameof(DeleteSelectedCommand), nameof(UndoCommand), nameof(RedoCommand), nameof(AlignGridToSelectedCommand))]
     private WorkspaceViewModel _activeWorkspace;
 
     private bool EditingAllowed => ActiveWorkspace.AllowsEditing;
@@ -76,6 +77,8 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Scene?.SetColorOverride(value.ColorOverride);
         value.OnActivated();
+        if (!value.AllowsEditing)
+            Build.Tool = EditTool.Select;
         if (!value.AllowsEditing)
             StatusText = $"{value.Name} workspace is read-only. Switch to Edit to change the blueprint.";
     }
@@ -91,6 +94,12 @@ public sealed partial class MainViewModel : ObservableObject
         // A new scene (new blueprint, or detail/texture change) starts with normal colors; reapply the workspace's.
         if (value is not null && ActiveWorkspace.ColorOverride is { } colors)
             value.SetColorOverride(colors);
+        if (value is not null)
+        {
+            value.OutlineWidth = _settings.OutlineWidth;
+            value.ShowOutlines = _settings.ShowOutlines;
+        }
+        Build.Refresh(); // the placement preview belongs to the scene, so redraw it in the new one
     }
 
     /// <summary>Lets workspaces know the blueprint changed (opened another one, or edited).</summary>
@@ -105,6 +114,9 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<PropertyRow> SelectedProperties { get; } = new();
 
     public PaintViewModel Paint { get; } = new();
+
+    /// <summary>The Select / Place tools, block palette and placement preview.</summary>
+    public BuildViewModel Build { get; }
 
     public string WindowTitle => Session is null
         ? "SE Blueprint Editor"
@@ -121,6 +133,32 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Whether textures are drawn (bound to View → Show textures).</summary>
     public bool ShowTextures => _settings.ShowTextures;
+
+    /// <summary>Whether armor block edges are outlined (bound to View → Show block outlines).</summary>
+    public bool ShowOutlines => _settings.ShowOutlines;
+
+    [RelayCommand]
+    private void ToggleOutlines()
+    {
+        _settings.ShowOutlines = !_settings.ShowOutlines;
+        _settings.Save();
+        OnPropertyChanged(nameof(ShowOutlines));
+        if (Scene is not null)
+            Scene.ShowOutlines = _settings.ShowOutlines;
+    }
+
+    /// <summary>Outline thickness (bound to View → Outline width).</summary>
+    public OutlineWidth OutlineWidth => _settings.OutlineWidth;
+
+    [RelayCommand]
+    private void SetOutlineWidth(OutlineWidth width)
+    {
+        _settings.OutlineWidth = width;
+        _settings.Save();
+        OnPropertyChanged(nameof(OutlineWidth));
+        if (Scene is not null)
+            Scene.OutlineWidth = width;
+    }
 
     /// <summary>Current texture resolution limit (bound to View → Texture quality).</summary>
     public TextureQuality TextureQuality => _settings.TextureQuality;
@@ -372,6 +410,7 @@ public sealed partial class MainViewModel : ObservableObject
             Session.Changed += OnSessionChanged;
             Session.HistoryChanged += OnHistoryChanged;
             Scene = new BlueprintScene(sceneData, defs, models); // GPU objects must be created on the UI thread
+            Build.OnBlueprintOpened(blueprint);
 
             TreeRoots.Clear();
             _nodeByBlock = new Dictionary<Block, BlockNodeViewModel>();
@@ -450,15 +489,119 @@ public sealed partial class MainViewModel : ObservableObject
             MessageBox.Show(ex.Message, "Can't delete", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
+
+        if (Session is not null)
+        {
+            var broken = GridLinks.FindBrokenBy(Session.Blueprint, SelectedBlocks);
+            if (broken.Count > 0 && !ConfirmBreakingLinks(broken))
+            {
+                StatusText = "Delete cancelled.";
+                return;
+            }
+        }
+
         SelectedBlocks = Array.Empty<Block>();
         Run(command);
     }
+
+    /// <summary>Warns that the delete detaches subgrids and leaves links to missing blocks. True = delete anyway.</summary>
+    private bool ConfirmBreakingLinks(IReadOnlyList<BrokenGridLink> broken)
+    {
+        const int maxListed = 10;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(broken.Count == 1
+            ? "This delete breaks a link between grids:"
+            : $"This delete breaks {broken.Count} links between grids:");
+        sb.AppendLine();
+
+        foreach (var link in broken.Take(maxListed))
+        {
+            sb.Append("•  ").Append(Describe(link.Deleted)).Append(link.Kind == GridLinkKind.Connector ? " is docked to " : " is attached to ")
+              .AppendLine(Describe(link.Remaining));
+        }
+        if (broken.Count > maxListed)
+            sb.AppendLine($"•  …and {broken.Count - maxListed} more");
+
+        sb.AppendLine();
+        sb.AppendLine("The other grid stays in the blueprint but will no longer be attached, and the remaining block " +
+                      "will still point at a block that no longer exists. The game may load the blueprint with that part " +
+                      "floating loose or misplaced.");
+        sb.AppendLine();
+        sb.Append("Delete anyway? (You can undo with Ctrl+Z.)");
+
+        return MessageBox.Show(sb.ToString(), "Delete breaks subgrid links",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+
+        string Describe(Block b)
+        {
+            var type = Definitions.Get(b).DisplayName;
+            var name = string.IsNullOrWhiteSpace(b.CustomName) || b.CustomName == type ? type : $"\"{b.CustomName}\" ({type})";
+            return $"{name} on grid \"{b.Grid.DisplayName}\"";
+        }
+    }
+
+    private bool CanAlignGrid() => EditingAllowed && SelectedBlocks.Count == 1;
+
+    /// <summary>Turns the selected block's grid so that block (usually the cockpit) faces Forward with its top Up.</summary>
+    [RelayCommand(CanExecute = nameof(CanAlignGrid))]
+    private void AlignGridToSelected()
+    {
+        var block = SelectedBlocks[0];
+        ReorientGridCommand command;
+        try
+        {
+            command = new ReorientGridCommand(block, b => Definitions.Get(b).Size);
+        }
+        catch (InvalidOperationException ex)
+        {
+            MessageBox.Show(ex.Message, "Align grid", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var def = Definitions.Get(block);
+        var name = string.IsNullOrWhiteSpace(block.CustomName) || block.CustomName == def.DisplayName
+            ? def.DisplayName
+            : $"\"{block.CustomName}\" ({def.DisplayName})";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Turn grid \"{block.Grid.DisplayName}\" so {name} faces forward with its top up?");
+        sb.AppendLine();
+        sb.AppendLine("The ship stays where it is and subgrids stay attached. Only the grid's own forward and up " +
+                      "directions change, which is what projectors and printers line the ship up with.");
+        if (command.RemovesDeformation)
+            sb.AppendLine().AppendLine("•  Armor deformation (dents) on this grid will be removed.");
+        if (command.RemovesMirrorPlanes)
+            sb.AppendLine().AppendLine("•  The grid's build-mode mirror planes will be cleared.");
+        var unknown = block.Grid.Blocks.Count(b => Definitions.Get(b).IsUnknown);
+        if (unknown > 0)
+            sb.AppendLine().AppendLine($"•  {unknown:N0} block(s) have no definition (mod blocks?). Their size is unknown, " +
+                                       "so blocks bigger than one cell may end up shifted.");
+        sb.AppendLine().Append("You can undo with Ctrl+Z.");
+
+        if (MessageBox.Show(sb.ToString(), "Align grid to selected block",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) != MessageBoxResult.Yes)
+            return;
+
+        Run(command);
+    }
+
+    /// <summary>Raised when the view should frame the whole ship again (e.g. after the grid was turned).</summary>
+    public event EventHandler? ZoomToFitRequested;
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private void PickColorFromSelection() => Paint.SetFromMask(SelectedBlocks[0].ColorMaskHsv);
 
     [RelayCommand]
-    private void ClearSelection() => SelectedBlocks = Array.Empty<Block>();
+    private void ClearSelection()
+    {
+        // Esc first leaves a placing tool, then clears the selection.
+        if (Build.IsPlacing)
+            Build.Tool = EditTool.Select;
+        else
+            SelectedBlocks = Array.Empty<Block>();
+    }
+
+    /// <summary>Runs an edit from another view model (e.g. placing a block).</summary>
+    internal void RunEdit(IEditCommand command) => Run(command);
 
     private void Run(IEditCommand command)
     {
@@ -475,25 +618,49 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    private void OnSessionChanged(object? sender, EditChange change)
+    private async void OnSessionChanged(object? sender, EditChange change)
     {
+        if (change.PlacementChanged)
+        {
+            // Subgrids are laid out relative to the main grid's rotation, so redraw everything.
+            RebuildTreeAndSelection(change);
+            RefreshProperties();
+            NotifyWorkspacesBlueprintChanged();
+            Build.OnGridsChanged(change.Grids);
+            try
+            {
+                await RebuildSceneAsync();
+                ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Couldn't redraw the blueprint", ex);
+            }
+            return;
+        }
+
         Scene?.UpdateGrids(change.Grids);
 
         if (change.StructureChanged)
-        {
-            foreach (var grid in change.Grids)
-                RebuildGridNode(grid);
-
-            // Drop anything that no longer exists (deleted blocks).
-            var alive = change.Grids.SelectMany(g => g.Blocks).ToHashSet();
-            var changedGrids = change.Grids.ToHashSet();
-            var remaining = SelectedBlocks.Where(b => !changedGrids.Contains(b.Grid) || alive.Contains(b)).ToArray();
-            if (remaining.Length != SelectedBlocks.Count)
-                SelectedBlocks = remaining;
-        }
+            RebuildTreeAndSelection(change);
 
         RefreshProperties();
         NotifyWorkspacesBlueprintChanged(); // e.g. armor analysis is out of date after a delete
+        if (change.StructureChanged)
+            Build.OnGridsChanged(change.Grids);
+    }
+
+    private void RebuildTreeAndSelection(EditChange change)
+    {
+        foreach (var grid in change.Grids)
+            RebuildGridNode(grid);
+
+        // Drop anything that no longer exists (deleted blocks).
+        var alive = change.Grids.SelectMany(g => g.Blocks).ToHashSet();
+        var changedGrids = change.Grids.ToHashSet();
+        var remaining = SelectedBlocks.Where(b => !changedGrids.Contains(b.Grid) || alive.Contains(b)).ToArray();
+        if (remaining.Length != SelectedBlocks.Count)
+            SelectedBlocks = remaining;
     }
 
     private void OnHistoryChanged(object? sender, EventArgs e)

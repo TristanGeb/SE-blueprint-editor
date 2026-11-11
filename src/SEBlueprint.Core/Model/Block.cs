@@ -47,6 +47,16 @@ public sealed class Block
         set => XmlHelpers.GetOrCreate(Element, "SubtypeName").Value = value;
     }
 
+    /// <summary>The block's unique id within the blueprint, or null if it has none (plain armor usually doesn't).</summary>
+    public string? EntityId
+    {
+        get
+        {
+            var id = Element.ChildValue("EntityId")?.Trim();
+            return string.IsNullOrEmpty(id) || id == "0" ? null : id;
+        }
+    }
+
     /// <summary>The player-given name shown in the terminal, if any.</summary>
     public string? CustomName
     {

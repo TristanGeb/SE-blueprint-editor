@@ -59,6 +59,9 @@ public sealed class SceneBatch
 
     /// <summary>Per-instance texture offset picking the armor pattern variant, or null.</summary>
     public Vector2[]? TexOffsets { get; init; }
+
+    /// <summary>True for armor shapes and plain boxes, which get edge outlines when outlines are turned on.</summary>
+    public bool Outlined { get; init; }
 }
 
 public sealed class BlueprintSceneData
@@ -70,9 +73,6 @@ public sealed class BlueprintSceneData
 
 public static class SceneBuilder
 {
-    /// <summary>Gap between armor blocks as a fraction of a cell, standing in for the game's armor edges.</summary>
-    public const float GapFraction = 0.03f;
-
     /// <summary>Color for blocks whose definition is missing (e.g. mod blocks), so they stand out.</summary>
     public static readonly Vector3 UnknownBlockColor = new(1f, 0f, 1f);
 
@@ -122,7 +122,6 @@ public static class SceneBuilder
         var blocks = grid.Blocks.ToArray();
         var boxTransforms = new Matrix4x4[blocks.Length];
         var batches = new Dictionary<BlockVisualPart, BatchBuilder>();
-        var gap = grid.CellSize * GapFraction;
 
         for (var i = 0; i < blocks.Length; i++)
         {
@@ -131,14 +130,14 @@ public static class SceneBuilder
             boxTransforms[i] = BoxTransform(block, def) * gridToScene;
 
             var visual = models.Get(def);
-            var transform = VisualTransform(block, def, visual, gap) * gridToScene;
+            var transform = VisualTransform(block, def, visual) * gridToScene;
             var paint = def.IsUnknown ? UnknownBlockColor : SeColor.MaskToRgb(block.ColorMaskHsv);
             var patternOffset = PatternOffset(block, visual.PatternCells);
 
             foreach (var part in visual.Parts)
             {
                 if (!batches.TryGetValue(part, out var batch))
-                    batches[part] = batch = new BatchBuilder(models.UseTextures && part.IsTextured);
+                    batches[part] = batch = new BatchBuilder(models.UseTextures && part.IsTextured, visual.IsUnitShape);
                 batch.Indices.Add(i);
                 batch.Transforms.Add(transform);
                 batch.Colors.Add(ColorFor(part.Appearance, paint, batch.Textured));
@@ -160,6 +159,7 @@ public static class SceneBuilder
                 Colors = kv.Value.Colors.ToArray(),
                 Textured = kv.Value.Textured,
                 TexOffsets = kv.Value.Textured && kv.Value.TexOffsets.Any(o => o != Vector2.Zero) ? kv.Value.TexOffsets.ToArray() : null,
+                Outlined = kv.Value.Outlined,
             }).ToList(),
         };
     }
@@ -188,15 +188,15 @@ public static class SceneBuilder
     /// Model space to grid space. Real models are in meters and centered on the block; unit shapes
     /// (armor, boxes) are scaled to the block's size first. Then rotate, then move to the block's center.
     /// </summary>
-    public static Matrix4x4 VisualTransform(Block block, BlockDefinition definition, BlockVisual visual, float gap)
+    public static Matrix4x4 VisualTransform(Block block, BlockDefinition definition, BlockVisual visual)
     {
         var (center, _) = BlockGeometry.LocalBox(block, definition);
         var rotation = RotationOf(block.Orientation);
 
         if (visual.IsUnitShape)
         {
+            // Full cell size, so neighbouring armor blocks meet without gaps (the textures draw the panel edges).
             var size = new Vector3(definition.Size.X, definition.Size.Y, definition.Size.Z) * block.Grid.CellSize;
-            size = Vector3.Max(size - new Vector3(gap), new Vector3(gap));
             return Matrix4x4.CreateScale(size) * rotation * Matrix4x4.CreateTranslation(center);
         }
 
@@ -235,9 +235,10 @@ public static class SceneBuilder
         return new Vector2(column / (float)cells.Columns, row / (float)cells.Rows);
     }
 
-    private sealed class BatchBuilder(bool textured)
+    private sealed class BatchBuilder(bool textured, bool outlined)
     {
         public bool Textured { get; } = textured;
+        public bool Outlined { get; } = outlined;
         public List<int> Indices { get; } = new();
         public List<Matrix4x4> Transforms { get; } = new();
         public List<Vector4> Colors { get; } = new();
