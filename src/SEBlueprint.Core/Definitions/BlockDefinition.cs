@@ -28,6 +28,23 @@ public sealed record BlockDefinition(
     /// </summary>
     public string? ArmorTileModel { get; init; }
 
+    /// <summary>
+    /// Hit points of the fully built block: the sum of its components' integrity (e.g. light armor = 25 steel
+    /// plates × 100 = 2,500). 0 if unknown.
+    /// </summary>
+    public float MaxIntegrity { get; init; }
+
+    /// <summary>Damage taken is multiplied by this (below 1 = tougher). Almost always 1.</summary>
+    public float GeneralDamageMultiplier { get; init; } = 1f;
+
+    /// <summary>How much damage the block absorbs before it is destroyed.</summary>
+    public float EffectiveHitPoints => MaxIntegrity / (GeneralDamageMultiplier > 0 ? GeneralDamageMultiplier : 1f);
+
+    /// <summary>
+    /// True for structural blocks (armor, panels, windows, interior walls): plain "CubeBlock"s without a function.
+    /// </summary>
+    public bool IsStructural => TypeId == "CubeBlock";
+
     /// <summary>Offset of the model from the block's center, in model space (meters). Almost always zero.</summary>
     public System.Numerics.Vector3 ModelOffset { get; init; }
 

@@ -29,6 +29,23 @@ public sealed class BlueprintScene
     private readonly Dictionary<Element3D, (GridEntry Grid, SceneBatch Batch)> _batchByModel = new();
     private readonly LineGeometryModel3D _selectionOutline;
     private IReadOnlyCollection<Block> _selection = Array.Empty<Block>();
+    private Func<Block, Vector4>? _colorOverride;
+
+    /// <summary>
+    /// Recolors every block with a rule (RGBA 0..1) instead of its paint, for analysis views such as heat maps.
+    /// Textures are turned off so the colors read clearly. Alpha below 1 makes blocks see-through, and blocks that
+    /// are mostly transparent can't be clicked (so you can click through ghosted armor). Null restores normal colors.
+    /// </summary>
+    public void SetColorOverride(Func<Block, Vector4>? colorOf)
+    {
+        _colorOverride = colorOf;
+        foreach (var entry in _grids.Values)
+        {
+            RemoveModels(entry);
+            AddModels(entry);
+        }
+        ShowSelection(_selection);
+    }
 
     public BlueprintScene(BlueprintSceneData data, DefinitionRepository definitions, BlockModelLibrary models)
     {
@@ -163,7 +180,7 @@ public sealed class BlueprintScene
     {
         foreach (var batch in entry.Data.Batches)
         {
-            var model = CreateBatchModel(batch);
+            var model = _colorOverride is null ? CreateBatchModel(batch) : CreateOverrideModel(entry, batch, _colorOverride);
             entry.Models.Add(model);
             _batchByModel[model] = (entry, batch);
             // Insert before the selection outline so it stays last (drawn on top).
@@ -223,6 +240,38 @@ public sealed class BlueprintScene
                 SpecularColor = new HelixToolkit.Maths.Color4(specular, specular, specular, 1f),
                 SpecularShininess = shininess,
                 DiffuseMap = texture,
+            },
+        };
+    }
+
+    /// <summary>A batch drawn with colors from an analysis rule instead of its paint and textures.</summary>
+    private static InstancingMeshGeometryModel3D CreateOverrideModel(GridEntry entry, SceneBatch batch, Func<Block, Vector4> colorOf)
+    {
+        var parameters = new InstanceParameter[batch.BlockIndices.Length];
+        var anyTransparent = false;
+        var allGhosted = true;
+        for (var i = 0; i < parameters.Length; i++)
+        {
+            var c = colorOf(entry.Data.Blocks[batch.BlockIndices[i]]);
+            parameters[i] = new InstanceParameter { DiffuseColor = new HelixToolkit.Maths.Color4(c.X, c.Y, c.Z, c.W) };
+            anyTransparent |= c.W < 0.999f;
+            allGhosted &= c.W < 0.5f;
+        }
+
+        return new InstancingMeshGeometryModel3D
+        {
+            Geometry = GpuMesh(batch.Part.Mesh),
+            Instances = batch.Transforms,
+            InstanceParamArray = parameters,
+            IsTransparent = anyTransparent,
+            IsHitTestVisible = !allGhosted,
+            CullMode = SharpDX.Direct3D11.CullMode.Back,
+            Material = new PhongMaterial
+            {
+                DiffuseColor = new HelixToolkit.Maths.Color4(1f, 1f, 1f, 1f),
+                AmbientColor = new HelixToolkit.Maths.Color4(0.35f, 0.35f, 0.35f, 1f),
+                SpecularColor = new HelixToolkit.Maths.Color4(0.1f, 0.1f, 0.1f, 1f),
+                SpecularShininess = 20f,
             },
         };
     }

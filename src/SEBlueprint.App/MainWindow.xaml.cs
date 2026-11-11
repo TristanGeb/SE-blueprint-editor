@@ -108,6 +108,14 @@ public partial class MainWindow : Window
 
     private void OnZoomExtents(object sender, RoutedEventArgs e) => ZoomToFit();
 
+    /// <summary>Clicking a row in the analysis list selects that block (and highlights it in 3D).</summary>
+    private void OnAnalysisRowClicked(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBoxItem { DataContext: ViewModels.Workspaces.AnalysisRow row } &&
+            _vm.ActiveWorkspace is ViewModels.Workspaces.AnalyzeWorkspaceViewModel analyze)
+            analyze.SelectRowCommand.Execute(row);
+    }
+
     /// <summary>
     /// Points the camera so the whole blueprint is in view, keeping the current viewing angle.
     /// Uses the scene's own bounding box (Helix's ZoomExtents only measures the shared block meshes,

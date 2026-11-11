@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using SEBlueprint.App.Services;
+using SEBlueprint.App.ViewModels.Workspaces;
 using SEBlueprint.App.Views;
 using SEBlueprint.Core;
 using SEBlueprint.Core.Colors;
@@ -52,6 +53,52 @@ public sealed partial class MainViewModel : ObservableObject
     private string _statusText = "Ready.";
 
     public Blueprint? Blueprint => Session?.Blueprint;
+
+    public MainViewModel()
+    {
+        Workspaces = new WorkspaceViewModel[] { new EditWorkspaceViewModel(this), new AnalyzeWorkspaceViewModel(this) };
+        _activeWorkspace = Workspaces[0];
+        foreach (var workspace in Workspaces)
+            workspace.PropertyChanged += OnWorkspacePropertyChanged;
+    }
+
+    /// <summary>The ways of using the editor, shown as tabs (Edit, Analyze...).</summary>
+    public IReadOnlyList<WorkspaceViewModel> Workspaces { get; }
+
+    /// <summary>The workspace in use. It decides the bottom-left panel, whether editing is allowed, and the 3D colors.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(PaintSelectedCommand), nameof(DeleteSelectedCommand), nameof(UndoCommand), nameof(RedoCommand))]
+    private WorkspaceViewModel _activeWorkspace;
+
+    private bool EditingAllowed => ActiveWorkspace.AllowsEditing;
+
+    partial void OnActiveWorkspaceChanged(WorkspaceViewModel value)
+    {
+        Scene?.SetColorOverride(value.ColorOverride);
+        value.OnActivated();
+        if (!value.AllowsEditing)
+            StatusText = $"{value.Name} workspace is read-only. Switch to Edit to change the blueprint.";
+    }
+
+    private void OnWorkspacePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(WorkspaceViewModel.ColorOverride) && sender == ActiveWorkspace)
+            Scene?.SetColorOverride(ActiveWorkspace.ColorOverride);
+    }
+
+    partial void OnSceneChanged(BlueprintScene? value)
+    {
+        // A new scene (new blueprint, or detail/texture change) starts with normal colors; reapply the workspace's.
+        if (value is not null && ActiveWorkspace.ColorOverride is { } colors)
+            value.SetColorOverride(colors);
+    }
+
+    /// <summary>Lets workspaces know the blueprint changed (opened another one, or edited).</summary>
+    private void NotifyWorkspacesBlueprintChanged()
+    {
+        foreach (var workspace in Workspaces)
+            workspace.OnBlueprintChanged();
+    }
 
     public ObservableCollection<TreeNodeViewModel> TreeRoots { get; } = new();
 
@@ -335,6 +382,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
             if (TreeRoots.Count > 0)
                 TreeRoots[0].IsExpanded = true;
+            NotifyWorkspacesBlueprintChanged();
 
             var unknown = blueprint.AllBlocks.Count(b => defs.Get(b).IsUnknown);
             StatusText = $"{blueprint.Name}: {blueprint.Grids.Count} grid(s), {blueprint.TotalBlockCount:N0} blocks"
@@ -372,22 +420,24 @@ public sealed partial class MainViewModel : ObservableObject
 
     // ───────────────────────────── Edit ─────────────────────────────
 
-    private bool CanUndo() => Session?.CanUndo == true;
+    private bool CanUndo() => EditingAllowed && Session?.CanUndo == true;
 
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private void Undo() => Session?.Undo();
 
-    private bool CanRedo() => Session?.CanRedo == true;
+    private bool CanRedo() => EditingAllowed && Session?.CanRedo == true;
 
     [RelayCommand(CanExecute = nameof(CanRedo))]
     private void Redo() => Session?.Redo();
 
     private bool HasSelection() => SelectedBlocks.Count > 0;
 
-    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private bool CanEditSelection() => EditingAllowed && SelectedBlocks.Count > 0;
+
+    [RelayCommand(CanExecute = nameof(CanEditSelection))]
     private void PaintSelected() => Run(new PaintBlocksCommand(SelectedBlocks, Paint.ColorMask));
 
-    [RelayCommand(CanExecute = nameof(HasSelection))]
+    [RelayCommand(CanExecute = nameof(CanEditSelection))]
     private void DeleteSelected()
     {
         DeleteBlocksCommand command;
@@ -412,6 +462,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void Run(IEditCommand command)
     {
+        if (!EditingAllowed)
+            return; // belt and braces: commands are disabled outside editing workspaces anyway
         try
         {
             Session?.Execute(command);
@@ -441,6 +493,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         RefreshProperties();
+        NotifyWorkspacesBlueprintChanged(); // e.g. armor analysis is out of date after a delete
     }
 
     private void OnHistoryChanged(object? sender, EventArgs e)

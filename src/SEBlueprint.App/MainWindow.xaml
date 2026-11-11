@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
         xmlns:vm="clr-namespace:SEBlueprint.App.ViewModels"
+        xmlns:ws="clr-namespace:SEBlueprint.App.ViewModels.Workspaces"
         xmlns:conv="clr-namespace:SEBlueprint.App.Converters"
         xmlns:models="clr-namespace:SEBlueprint.Core.Models;assembly=SEBlueprint.Core"
         xmlns:render="clr-namespace:SEBlueprint.Rendering;assembly=SEBlueprint.Rendering"
@@ -30,6 +31,7 @@
 
     <Window.Resources>
         <conv:EnumEqualsConverter x:Key="EnumEquals" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <Style x:Key="SectionHeader" TargetType="TextBlock">
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="6,6,6,4" />
@@ -107,6 +109,42 @@
                 </MenuItem>
             </MenuItem>
         </Menu>
+
+        <!-- Workspace tabs: different ways of using the editor on the same blueprint -->
+        <Border DockPanel.Dock="Top" Background="#EEF0F3" BorderBrush="#C9CDD3" BorderThickness="0,0,0,1">
+            <ListBox ItemsSource="{Binding Workspaces}" SelectedItem="{Binding ActiveWorkspace}"
+                     Background="Transparent" BorderThickness="0" Margin="4,2"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="ToolTip" Value="{Binding Description}" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Tab" Padding="16,4" Margin="0,0,2,0" CornerRadius="3" Background="Transparent">
+                                        <TextBlock x:Name="Label" Text="{Binding Name}" FontWeight="SemiBold" Foreground="#4A5260" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Tab" Property="Background" Value="#DDE2E8" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Tab" Property="Background" Value="#3D6FB6" />
+                                            <Setter TargetName="Label" Property="Foreground" Value="White" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+            </ListBox>
+        </Border>
 
         <!-- Status bar -->
         <StatusBar DockPanel.Dock="Bottom">
@@ -188,8 +226,13 @@
                     </ScrollViewer>
                 </DockPanel>
 
-                <!-- Paint -->
-                <StackPanel Grid.Row="3" DataContext="{Binding Paint}">
+                <!-- Workspace panel: what appears here depends on the active workspace (a DataTemplate per type) -->
+                <ContentControl Grid.Row="3" Content="{Binding ActiveWorkspace}" Focusable="False">
+                    <ContentControl.Resources>
+
+                        <!-- Edit workspace: paint tools -->
+                        <DataTemplate DataType="{x:Type ws:EditWorkspaceViewModel}">
+                <StackPanel DataContext="{Binding DataContext.Paint, RelativeSource={RelativeSource AncestorType=Window}}">
                     <Separator />
                     <TextBlock Text="Paint" Style="{StaticResource SectionHeader}" />
                     <Grid Margin="6,0,6,0">
@@ -243,6 +286,61 @@
                                 Command="{Binding DataContext.PaintSelectedCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
                     </StackPanel>
                 </StackPanel>
+                        </DataTemplate>
+
+                        <!-- Analyze workspace: armor heat map -->
+                        <DataTemplate DataType="{x:Type ws:AnalyzeWorkspaceViewModel}">
+                            <StackPanel>
+                                <Separator />
+                                <TextBlock Text="Armor heat map" Style="{StaticResource SectionHeader}" />
+                                <StackPanel Orientation="Horizontal" Margin="6,0,6,4">
+                                    <RadioButton Content="Hull thickness" IsChecked="{Binding ShowsThickness}" Margin="0,0,14,0" GroupName="ArmorView" />
+                                    <RadioButton Content="Exposed components" IsChecked="{Binding ShowsExposure}" GroupName="ArmorView" />
+                                </StackPanel>
+                                <CheckBox Content="Critical blocks only (reactors, cockpits, gyros…)" IsChecked="{Binding CriticalOnly}"
+                                          Margin="6,2,6,4" Visibility="{Binding ShowsExposure, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Text="{Binding Explanation}" TextWrapping="Wrap" Foreground="Gray" Margin="6,0,6,6" />
+
+                                <!-- Legend -->
+                                <Border Height="12" Margin="6,0,6,2" CornerRadius="2" Background="{Binding LegendBrush}" />
+                                <Grid Margin="6,0,6,6">
+                                    <TextBlock Text="{Binding LegendLow}" Foreground="Gray" FontSize="11" HorizontalAlignment="Left" />
+                                    <TextBlock Text="{Binding LegendMid}" Foreground="Gray" FontSize="11" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding LegendHigh}" Foreground="Gray" FontSize="11" HorizontalAlignment="Right" />
+                                </Grid>
+
+                                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="6,0,6,4" />
+                                <ListBox ItemsSource="{Binding Rows}" Height="220" Margin="6,0,6,8"
+                                         HorizontalContentAlignment="Stretch"
+                                         VirtualizingPanel.IsVirtualizing="True"
+                                         ToolTip="Click a row to select that block">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="OnAnalysisRowClicked" />
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="10" Height="10" Margin="0,0,6,0" Background="{Binding Swatch}" CornerRadius="2" />
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Direction}" Foreground="Gray" FontSize="11" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="2" Text="{Binding HitPoints}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ContentControl.Resources>
+                </ContentControl>
             </Grid>
 
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" ResizeDirection="Columns" />

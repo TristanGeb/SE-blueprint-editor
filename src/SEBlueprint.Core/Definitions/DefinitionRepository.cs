@@ -33,6 +33,10 @@ public sealed class DefinitionRepository
             localization = Localization.LoadResx(resx);
 
         var repo = new DefinitionRepository();
+        var components = Path.Combine(contentPath, "Data", "Components.sbc");
+        if (File.Exists(components))
+            repo.LoadComponents(XDocument.Load(components));
+
         var folder = Path.Combine(contentPath, "Data", "CubeBlocks");
         foreach (var file in Directory.EnumerateFiles(folder, "*.sbc").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
             repo.LoadFile(file, localization);
@@ -62,9 +66,28 @@ public sealed class DefinitionRepository
 
         foreach (var def in cubeBlocks.Elements("Definition"))
         {
-            var parsed = Parse(def, localization);
+            var parsed = Parse(def, localization, _componentIntegrity);
             if (parsed is not null)
                 Add(parsed);
+        }
+    }
+
+    /// <summary>Hit points of one of each component type, e.g. "SteelPlate" → 100. Used to compute block HP.</summary>
+    private readonly Dictionary<string, float> _componentIntegrity = new(StringComparer.Ordinal);
+
+    /// <summary>Reads component integrity values (Content\Data\Components.sbc). Load before block definitions.</summary>
+    public void LoadComponents(XDocument doc)
+    {
+        var components = doc.Root?.Element("Components");
+        if (components is null)
+            return;
+        // The game's file uses <Component> entries; accept <Definition> too, as mods sometimes do.
+        foreach (var def in components.Elements().Where(e => e.Name.LocalName is "Component" or "Definition"))
+        {
+            var subtype = def.Element("Id")?.ChildValue("SubtypeId") ?? def.Element("Id")?.Attribute("Subtype")?.Value;
+            var integrity = XmlHelpers.ParseFloat(def.ChildValue("MaxIntegrity"));
+            if (!string.IsNullOrEmpty(subtype) && integrity > 0)
+                _componentIntegrity[subtype] = integrity;
         }
     }
 
@@ -95,7 +118,7 @@ public sealed class DefinitionRepository
 
     public bool Contains(Block block) => !Get(block).IsUnknown;
 
-    private static BlockDefinition? Parse(XElement def, Localization localization)
+    private static BlockDefinition? Parse(XElement def, Localization localization, IReadOnlyDictionary<string, float> componentIntegrity)
     {
         // The Id is usually <Id><TypeId/><SubtypeId/></Id>, but some files use <Id Type="" Subtype=""/>.
         var id = def.Element("Id");
@@ -134,6 +157,10 @@ public sealed class DefinitionRepository
                 .Select(s => s.Attribute("Model")?.Value)
                 .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))?.Trim(),
             ModelOffset = XmlHelpers.ReadVector3(def.Element("ModelOffset")) ?? System.Numerics.Vector3.Zero,
+            MaxIntegrity = def.Element("Components")?.Elements("Component").Sum(c =>
+                XmlHelpers.ParseFloat(c.Attribute("Count")?.Value) *
+                (componentIntegrity.TryGetValue(c.Attribute("Subtype")?.Value ?? string.Empty, out var hp) ? hp : 0f)) ?? 0f,
+            GeneralDamageMultiplier = def.Element("GeneralDamageMultiplier") is { } m ? XmlHelpers.ParseFloat(m.Value, 1f) : 1f,
         };
     }
 }
