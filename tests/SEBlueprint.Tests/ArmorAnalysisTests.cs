@@ -95,6 +95,19 @@ public class ArmorAnalysisTests
     }
 
     [Fact]
+    public void Diagonal_rays_do_not_slip_between_blocks_that_only_touch_at_edges()
+    {
+        // Remove the corner block: the corner is now empty, but every block around it is armor, so a shot
+        // aimed diagonally still has to go through one of the blocks meeting at that corner.
+        var bp = ArmoredReactor();
+        new SEBlueprint.Core.Editing.DeleteBlocksCommand(new[] { At(bp, 1, 1, 1) }).Do();
+
+        var reactor = ArmorAnalysis.Analyze(bp, Definitions(), ArmorAnalysisKind.Exposure).Measurements[At(bp, 0, 0, 0)];
+
+        Assert.Equal(2500f, reactor.HitPoints);
+    }
+
+    [Fact]
     public void Thickness_measures_armor_behind_each_outer_face()
     {
         var bp = ArmoredReactor();

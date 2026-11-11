@@ -178,9 +178,23 @@ public sealed class BlueprintScene
 
     private void AddModels(GridEntry entry)
     {
-        foreach (var batch in entry.Data.Batches)
+        foreach (var fullBatch in entry.Data.Batches)
         {
-            var model = _colorOverride is null ? CreateBatchModel(batch) : CreateOverrideModel(entry, batch, _colorOverride);
+            var batch = fullBatch;
+            InstancingMeshGeometryModel3D model;
+            if (_colorOverride is null)
+            {
+                model = CreateBatchModel(batch);
+            }
+            else
+            {
+                // Blocks the rule makes fully transparent are left out entirely: drawing them invisibly still costs
+                // a see-through pass over every triangle (that halved the frame rate on large ships).
+                batch = VisibleOnly(entry, batch, _colorOverride, out var colors);
+                if (batch.BlockIndices.Length == 0)
+                    continue;
+                model = CreateOverrideModel(batch, colors);
+            }
             entry.Models.Add(model);
             _batchByModel[model] = (entry, batch);
             // Insert before the selection outline so it stays last (drawn on top).
@@ -244,15 +258,54 @@ public sealed class BlueprintScene
         };
     }
 
+    /// <summary>The part of a batch whose blocks the color rule doesn't hide (alpha 0), with their colors.</summary>
+    private static SceneBatch VisibleOnly(GridEntry entry, SceneBatch batch, Func<Block, Vector4> colorOf, out Vector4[] colors)
+    {
+        var all = new Vector4[batch.BlockIndices.Length];
+        var visible = 0;
+        for (var i = 0; i < all.Length; i++)
+        {
+            all[i] = colorOf(entry.Data.Blocks[batch.BlockIndices[i]]);
+            if (all[i].W > 0.001f)
+                visible++;
+        }
+        if (visible == all.Length)
+        {
+            colors = all;
+            return batch;
+        }
+
+        var indices = new int[visible];
+        var transforms = new Matrix4x4[visible];
+        colors = new Vector4[visible];
+        for (int i = 0, k = 0; i < all.Length; i++)
+        {
+            if (all[i].W <= 0.001f)
+                continue;
+            indices[k] = batch.BlockIndices[i];
+            transforms[k] = batch.Transforms[i];
+            colors[k] = all[i];
+            k++;
+        }
+        return new SceneBatch
+        {
+            Part = batch.Part,
+            BlockIndices = indices,
+            Transforms = transforms,
+            Colors = colors,
+            Textured = false,
+        };
+    }
+
     /// <summary>A batch drawn with colors from an analysis rule instead of its paint and textures.</summary>
-    private static InstancingMeshGeometryModel3D CreateOverrideModel(GridEntry entry, SceneBatch batch, Func<Block, Vector4> colorOf)
+    private static InstancingMeshGeometryModel3D CreateOverrideModel(SceneBatch batch, Vector4[] colors)
     {
         var parameters = new InstanceParameter[batch.BlockIndices.Length];
         var anyTransparent = false;
         var allGhosted = true;
         for (var i = 0; i < parameters.Length; i++)
         {
-            var c = colorOf(entry.Data.Blocks[batch.BlockIndices[i]]);
+            var c = colors[i];
             parameters[i] = new InstanceParameter { DiffuseColor = new HelixToolkit.Maths.Color4(c.X, c.Y, c.Z, c.W) };
             anyTransparent |= c.W < 0.999f;
             allGhosted &= c.W < 0.5f;

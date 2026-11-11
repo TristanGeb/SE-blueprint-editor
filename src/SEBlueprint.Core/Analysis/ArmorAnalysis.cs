@@ -138,6 +138,7 @@ public static class ArmorAnalysis
             var weakestDirection = Vector3I.Zero;
             foreach (var direction in AllDirections)
             {
+                var isDiagonal = System.Math.Abs(direction.X) + System.Math.Abs(direction.Y) + System.Math.Abs(direction.Z) > 1;
                 foreach (var cell in info.Cells)
                 {
                     // Only start from the block's outer cells on this side; inner cells are always better shielded.
@@ -146,12 +147,14 @@ public static class ArmorAnalysis
 
                     // Sum the HP of every other block between this cell and the edge of the grid.
                     float hp = 0;
+                    var from = cell;
                     var p = cell + direction;
-                    while (grid.Contains(p) && hp < weakest)
+                    while ((grid.Contains(p) || grid.Contains(from)) && hp < weakest)
                     {
-                        var index = grid.IndexAt(p);
-                        if (index >= 0 && index != i)
-                            hp += grid.Blocks[index].HitPointsPerCell;
+                        hp += CellHitPoints(grid, p, i);
+                        if (isDiagonal)
+                            hp += CrossingHitPoints(grid, from, direction, i);
+                        from = p;
                         p += direction;
                     }
                     if (hp < weakest)
@@ -165,6 +168,47 @@ public static class ArmorAnalysis
             results.Add(new ArmorMeasurement(info.Block, weakest == float.MaxValue ? 0 : weakest, weakestDirection));
         });
         return results;
+    }
+
+    private static float CellHitPoints(GridOccupancy grid, Vector3I p, int self)
+    {
+        var index = grid.IndexAt(p);
+        return index >= 0 && index != self ? grid.Blocks[index].HitPointsPerCell : 0f;
+    }
+
+    /// <summary>
+    /// A diagonal step from one cell to the next passes exactly through the edge (or corner) where the cells
+    /// "in between" meet, e.g. stepping (1,1,0) passes between the cells at +X and +Y. Without this, diagonal rays
+    /// slipped through hulls made of blocks that only touch along an edge. A real shot passing there hits one of
+    /// those in-between blocks, so the cheapest one is counted; if any of them is empty, the shot can squeeze
+    /// through that gap and nothing is added.
+    /// </summary>
+    private static float CrossingHitPoints(GridOccupancy grid, Vector3I from, Vector3I d, int self)
+    {
+        // The direction's non-zero axes, e.g. (1,0,-1) → [(1,0,0), (0,0,-1)].
+        Span<Vector3I> axes = stackalloc Vector3I[3];
+        var axisCount = 0;
+        if (d.X != 0) axes[axisCount++] = new Vector3I(d.X, 0, 0);
+        if (d.Y != 0) axes[axisCount++] = new Vector3I(0, d.Y, 0);
+        if (d.Z != 0) axes[axisCount++] = new Vector3I(0, 0, d.Z);
+
+        var cheapest = float.MaxValue;
+        // Every partial step: each non-empty proper subset of those axes (2 for an edge diagonal, 6 for a corner).
+        var full = (1 << axisCount) - 1;
+        for (var mask = 1; mask < full; mask++)
+        {
+            var partial = Vector3I.Zero;
+            for (var a = 0; a < axisCount; a++)
+            {
+                if ((mask & (1 << a)) != 0)
+                    partial += axes[a];
+            }
+            var index = grid.IndexAt(from + partial);
+            if (index < 0 || index == self)
+                return 0f; // a gap: the shot can pass here
+            cheapest = System.Math.Min(cheapest, grid.Blocks[index].HitPointsPerCell);
+        }
+        return cheapest == float.MaxValue ? 0f : cheapest;
     }
 
     /// <summary>Which block occupies each cell of a grid, stored densely for fast ray marching.</summary>

@@ -204,7 +204,9 @@ public sealed partial class AnalyzeWorkspaceViewModel : WorkspaceViewModel
                 return new Vector4(0.6f, 0.68f, 0.78f, 0.07f); // ghosted armor so components show through
             if (measurements.TryGetValue(block, out var e) && (!criticalOnly || IsCritical(def)))
                 return new Vector4(HeatColor(HeatFraction(e.HitPoints)), 1f);
-            return new Vector4(0.55f, 0.57f, 0.6f, 0.35f); // other components: faint
+            // Components filtered out by "critical only" are hidden (alpha 0 → not drawn at all). Drawing ~1,000
+            // detailed models semi-transparently cost a third of the frame rate on large ships.
+            return Vector4.Zero;
         };
     }
 
